@@ -4,6 +4,14 @@ Generates a synthetic 3D trajectory from physical parameters controlled
 by sidebar sliders, extracts the same 76 physics features used in
 production, and classifies in real time using the trained XGBoost model.
 
+Model loading strategy (in priority order):
+    1. Local file ``model.pkl`` in the project root (fastest — created by
+       running ``python src/main.py``).
+    2. Remote download from the GitHub Release asset at
+       ``MODEL_RELEASE_URL`` (automatic fallback when no local file exists,
+       e.g. in a fresh clone or cloud deployment).  The download is cached
+       by ``@st.cache_resource`` so it only happens once per session.
+
 Run with:
     streamlit run src/app.py
 """
@@ -15,12 +23,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent))
 from features import _extract_trajectory_features
 
 MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
+MODEL_RELEASE_URL = (
+    "https://github.com/IlyaNovikov-RD/rocket_classifier"
+    "/releases/download/v1.0.0/model.pkl"
+)
 
 # ── Display constants ──────────────────────────────────────────────────────────
 CLASS_NAMES = {0: "Class 0", 1: "Class 1", 2: "Class 2"}
@@ -37,16 +50,58 @@ BLUE = "#58a6ff"
 
 
 @st.cache_resource
-def load_model():
-    """Load the trained XGBoost classifier from disk.
+def _download_model() -> bytes | None:
+    """Download the model binary from the GitHub Release asset.
+
+    Streams ``MODEL_RELEASE_URL`` in 8 KB chunks so that large binaries do
+    not require buffering the full file in memory before writing.  HTTP
+    errors and network failures are caught and surfaced as Streamlit
+    warnings rather than crashing the app.
+
+    This function is decorated with ``@st.cache_resource`` so the download
+    runs at most once per Streamlit server process, regardless of how many
+    browser sessions are open.
 
     Returns:
-        The unpickled XGBClassifier, or None if model.pkl does not exist.
+        The raw model bytes on success, or ``None`` if the download failed.
     """
-    if not MODEL_PATH.exists():
+    try:
+        response = requests.get(MODEL_RELEASE_URL, stream=True, timeout=60)
+        response.raise_for_status()
+        chunks = []
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                chunks.append(chunk)
+        return b"".join(chunks)
+    except requests.RequestException as exc:
+        st.warning(f"Could not download model from GitHub Release: {exc}")
         return None
-    with MODEL_PATH.open("rb") as f:
-        return pickle.load(f)
+
+
+@st.cache_resource
+def load_model():
+    """Load the trained XGBoost classifier, downloading it if needed.
+
+    Resolution order:
+        1. Local ``model.pkl`` in the project root — used when the full
+           training pipeline has been run locally (``python src/main.py``).
+        2. Remote download from the GitHub Release asset at
+           ``MODEL_RELEASE_URL`` — automatic fallback for fresh clones or
+           cloud deployments where no local file exists.
+
+    Returns:
+        The unpickled XGBClassifier, or ``None`` if neither source is
+        available.
+    """
+    if MODEL_PATH.exists():
+        with MODEL_PATH.open("rb") as f:
+            return pickle.load(f)
+
+    # Fallback: fetch from GitHub Release
+    model_bytes = _download_model()
+    if model_bytes is None:
+        return None
+    return pickle.loads(model_bytes)
 
 
 @st.cache_data
