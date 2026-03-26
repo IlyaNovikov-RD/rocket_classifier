@@ -114,9 +114,9 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
 
         # --- Launch angle (elevation angle of initial velocity vector) ---
         # Angle between initial velocity and horizontal plane
-        feats["launch_angle_elev"] = float(
-            np.arctan2(vz[0], np.sqrt(vx[0] ** 2 + vy[0] ** 2))
-        ) if speed[0] > 0 else np.nan
+        feats["launch_angle_elev"] = (
+            float(np.arctan2(vz[0], np.sqrt(vx[0] ** 2 + vy[0] ** 2))) if speed[0] > 0 else np.nan
+        )
 
         # Azimuth of initial velocity (heading in horizontal plane)
         feats["launch_angle_azimuth"] = float(np.arctan2(vy[0], vx[0]))
@@ -142,10 +142,24 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
             feats["mean_az"] = float(np.mean(az))  # should be ~-g for ballistic
 
         else:
-            for k in ["acc_mag_mean", "acc_mag_std", "acc_mag_min", "acc_mag_max",
-                      "acc_mag_median", "az_mean", "az_std", "az_min", "az_max",
-                      "az_median", "acc_horiz_mean", "acc_horiz_std",
-                      "acc_horiz_min", "acc_horiz_max", "acc_horiz_median", "mean_az"]:
+            for k in [
+                "acc_mag_mean",
+                "acc_mag_std",
+                "acc_mag_min",
+                "acc_mag_max",
+                "acc_mag_median",
+                "az_mean",
+                "az_std",
+                "az_min",
+                "az_max",
+                "az_median",
+                "acc_horiz_mean",
+                "acc_horiz_std",
+                "acc_horiz_min",
+                "acc_horiz_max",
+                "acc_horiz_median",
+                "mean_az",
+            ]:
                 feats[k] = np.nan
 
         # --- 3D Jerk ---
@@ -153,19 +167,40 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
             jerk_mag = np.linalg.norm(jerk, axis=1)
             feats.update(_safe_stats(jerk_mag, "jerk_mag"))
         else:
-            for k in ["jerk_mag_mean", "jerk_mag_std", "jerk_mag_min",
-                      "jerk_mag_max", "jerk_mag_median"]:
+            for k in [
+                "jerk_mag_mean",
+                "jerk_mag_std",
+                "jerk_mag_min",
+                "jerk_mag_max",
+                "jerk_mag_median",
+            ]:
                 feats[k] = np.nan
 
     else:
         # Not enough points for derivatives
-        for prefix in ["speed", "vx", "vy", "vz", "v_horiz", "acc_mag",
-                        "az", "acc_horiz", "jerk_mag"]:
+        for prefix in [
+            "speed",
+            "vx",
+            "vy",
+            "vz",
+            "v_horiz",
+            "acc_mag",
+            "az",
+            "acc_horiz",
+            "jerk_mag",
+        ]:
             for stat in ["mean", "std", "min", "max", "median"]:
                 feats[f"{prefix}_{stat}"] = np.nan
-        for k in ["launch_angle_elev", "launch_angle_azimuth", "initial_speed",
-                   "initial_vz", "initial_v_horiz", "final_speed", "final_vz",
-                   "mean_az"]:
+        for k in [
+            "launch_angle_elev",
+            "launch_angle_azimuth",
+            "initial_speed",
+            "initial_vz",
+            "initial_v_horiz",
+            "final_speed",
+            "final_vz",
+            "mean_az",
+        ]:
             feats[k] = np.nan
 
     # --- Apogee and Time-to-Apogee ---
@@ -181,9 +216,7 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     feats["apogee_time_frac"] = float(apogee_idx / max(n_points - 1, 1))
     # Absolute time to apogee
     if len(dt_sec) > 0 and apogee_idx > 0:
-        feats["time_to_apogee_s"] = float(
-            np.nansum(dt_sec[:apogee_idx])
-        )
+        feats["time_to_apogee_s"] = float(np.nansum(dt_sec[:apogee_idx]))
     else:
         feats["time_to_apogee_s"] = 0.0
 
@@ -193,9 +226,7 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     feats["z_range"] = float(np.ptp(pos[:, 2]))
 
     # 2D horizontal range (max displacement in xy plane from launch)
-    xy_disp = np.sqrt(
-        (pos[:, 0] - pos[0, 0]) ** 2 + (pos[:, 1] - pos[0, 1]) ** 2
-    )
+    xy_disp = np.sqrt((pos[:, 0] - pos[0, 0]) ** 2 + (pos[:, 1] - pos[0, 1]) ** 2)
     feats["max_horiz_range"] = float(np.max(xy_disp))
     feats["final_horiz_range"] = float(xy_disp[-1])
 

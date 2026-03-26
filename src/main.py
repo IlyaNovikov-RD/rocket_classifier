@@ -17,7 +17,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 
 from features import build_features
-from model import train_with_cv, predict, min_class_recall
+from model import predict, train_with_cv
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -68,7 +68,9 @@ def main() -> None:
 
     logger.info(
         "Label distribution — 0: %d, 1: %d, 2: %d",
-        (y_train == 0).sum(), (y_train == 1).sum(), (y_train == 2).sum(),
+        (y_train == 0).sum(),
+        (y_train == 1).sum(),
+        (y_train == 2).sum(),
     )
 
     # Align test columns to train (fill any missing with NaN)
@@ -82,29 +84,31 @@ def main() -> None:
     logger.info("Feature matrix — train: %s, test: %s", X_train.shape, X_test.shape)
 
     # --- Step 3: Train with CV ---
-    model, fold_scores = train_with_cv(
-        X_train, y_train, groups, n_splits=5
-    )
+    model, fold_scores = train_with_cv(X_train, y_train, groups, n_splits=5)
     logger.info("Final CV min-recall scores: %s", [f"{s:.4f}" for s in fold_scores])
 
     # --- Step 4: Predict ---
     y_pred = predict(model, X_test)
     logger.info(
         "Test predictions — 0: %d, 1: %d, 2: %d",
-        (y_pred == 0).sum(), (y_pred == 1).sum(), (y_pred == 2).sum(),
+        (y_pred == 0).sum(),
+        (y_pred == 1).sum(),
+        (y_pred == 2).sum(),
     )
 
     # --- Step 5: Export submission ---
     # sample_submission.csv columns: label, trajectory_ind
-    submission = pd.DataFrame({
-        "trajectory_ind": test_feats.index.tolist(),
-        "label": y_pred,
-    })
+    submission = pd.DataFrame(
+        {
+            "trajectory_ind": test_feats.index.tolist(),
+            "label": y_pred,
+        }
+    )
 
     # Ensure ordering matches sample_submission.csv
-    submission = submission.set_index("trajectory_ind").reindex(
-        sample_sub["trajectory_ind"]
-    ).reset_index()
+    submission = (
+        submission.set_index("trajectory_ind").reindex(sample_sub["trajectory_ind"]).reset_index()
+    )
 
     # Match exact column order of sample_submission: label, trajectory_ind
     submission = submission[["label", "trajectory_ind"]]
