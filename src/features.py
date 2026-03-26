@@ -1,40 +1,55 @@
-"""
-Feature engineering for rocket trajectory classification.
+"""Feature engineering for rocket trajectory classification.
 
 Assumptions:
-- z is altitude (height plane); x, y are horizontal coordinates.
-- Shtuchia has flat terrain: no terrain correction needed.
-- Rockets follow standard frictionless ballistic trajectories.
-- Per-trajectory aggregation: one feature vector per traj_ind.
-- Time deltas derived from time_stamp column (parsed as datetime).
+    - z is altitude (height plane); x, y are horizontal coordinates.
+    - Shtuchia has flat terrain: no terrain correction needed.
+    - Rockets follow standard frictionless ballistic trajectories.
+    - Per-trajectory aggregation: one feature vector per traj_ind.
+    - Time deltas derived from time_stamp column (parsed as datetime).
 """
+
+import logging
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_derivatives(
     pos: np.ndarray,
     dt: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute velocity, acceleration, jerk via finite differences.
+    """Compute velocity, acceleration, and jerk via finite differences.
+
+    Uses forward differences on position to derive velocity, then applies
+    midpoint-averaged time deltas for each subsequent derivative order to
+    minimise discretisation error.
+
+    Note:
+        dt=0 is NOT sanitised here. The caller is responsible for replacing
+        zero or negative time deltas before passing them to this function.
+        Passing dt=0 will produce non-finite (inf/nan) velocity values.
 
     Args:
-        pos: (N, 3) array of [x, y, z] positions, sorted by time.
-        dt:  (N-1,) array of time deltas in seconds between consecutive points.
+        pos: Position array of shape (N, 3) with columns [x, y, z],
+            sorted in ascending time order.
+        dt: Time delta array of shape (N-1,) in seconds between
+            consecutive position samples.
 
     Returns:
-        vel:  (N-1, 3) velocity vectors [m/s equivalent].
-        acc:  (N-2, 3) acceleration vectors.
-        jerk: (N-3, 3) jerk vectors.
+        A tuple of (vel, acc, jerk) where:
+            vel:  Velocity array of shape (N-1, 3) in units/s.
+            acc:  Acceleration array of shape (N-2, 3), or (0, 3) if
+                fewer than 2 velocity samples are available.
+            jerk: Jerk array of shape (N-3, 3), or (0, 3) if fewer than
+                2 acceleration samples are available.
     """
-    # Velocity: forward difference on positions
     vel = np.diff(pos, axis=0) / dt[:, np.newaxis]
 
     if vel.shape[0] < 2:
         return vel, np.empty((0, 3)), np.empty((0, 3))
 
-    # Midpoint dt for acceleration (between consecutive velocity estimates)
     dt_acc = (dt[:-1] + dt[1:]) / 2.0
     acc = np.diff(vel, axis=0) / dt_acc[:, np.newaxis]
 
@@ -48,7 +63,23 @@ def _compute_derivatives(
 
 
 def _safe_stats(arr: np.ndarray, prefix: str) -> dict[str, float]:
-    """Return mean/std/min/max/median of 1-D array, with NaN fallback."""
+    """Compute descriptive statistics for a 1-D array with NaN fallback.
+
+    Returns five statistics (mean, std, min, max, median) for the input
+    array. If the array is empty, all five values are returned as NaN so
+    that downstream feature matrices remain consistently shaped regardless
+    of trajectory length.
+
+    Args:
+        arr: 1-D numeric array to summarise. May be empty.
+        prefix: String prefix applied to every output key, e.g. ``"speed"``
+            produces keys ``speed_mean``, ``speed_std``, etc.
+
+    Returns:
+        A dictionary with five entries keyed as ``{prefix}_mean``,
+        ``{prefix}_std``, ``{prefix}_min``, ``{prefix}_max``, and
+        ``{prefix}_median``. All values are Python floats.
+    """
     if arr.size == 0:
         return {
             f"{prefix}_mean": np.nan,
@@ -69,11 +100,22 @@ def _safe_stats(arr: np.ndarray, prefix: str) -> dict[str, float]:
 def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     """Extract all physics-based and statistical features for one trajectory.
 
+    Computes 76 scalar features from the raw point sequence of a single
+    trajectory, including kinematic derivatives (velocity, acceleration, jerk),
+    ballistic parameters (launch angle, apogee), and spatial statistics.
+    All features are returned even for very short trajectories — derivative
+    features are set to NaN when insufficient points are available.
+
     Args:
-        group: DataFrame rows for a single traj_ind, pre-sorted by time_stamp.
+        group: DataFrame of rows belonging to a single ``traj_ind``,
+            pre-sorted by ``time_stamp`` in ascending order. Must contain
+            columns ``time_stamp`` (datetime64), ``x``, ``y``, and ``z``
+            (float64).
 
     Returns:
-        Dictionary of feature_name -> float value.
+        A flat dictionary mapping feature name to float value. Contains
+        exactly 76 keys regardless of trajectory length. NaN is used for
+        features that cannot be computed (e.g. acceleration when N < 3).
     """
     feats: dict[str, float] = {}
 
@@ -246,15 +288,23 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate point-level data into per-trajectory feature matrix.
+    """Aggregate point-level radar data into a per-trajectory feature matrix.
+
+    Parses timestamps, sorts each trajectory chronologically, then calls
+    ``_extract_trajectory_features`` for every unique ``traj_ind``. The
+    result is a single row per trajectory with 76 physics-derived features
+    (plus an optional ``label`` column when training data is supplied).
 
     Args:
-        df: Raw DataFrame with columns [traj_ind, time_stamp, x, y, z].
-            Optionally includes 'label' (train only).
+        df: Raw point-level DataFrame with columns ``traj_ind``,
+            ``time_stamp``, ``x``, ``y``, ``z``. An optional ``label``
+            column is preserved when present (training data only).
 
     Returns:
-        Per-trajectory feature DataFrame indexed by traj_ind.
-        Includes 'label' column if present in input.
+        Per-trajectory feature DataFrame with ``traj_ind`` as the index.
+        Shape is (n_trajectories, 76) without label, (n_trajectories, 77)
+        with label. All feature values are float64; NaN indicates a feature
+        that could not be computed for a given trajectory.
     """
     df = df.copy()
     df["time_stamp"] = pd.to_datetime(df["time_stamp"], format="mixed")
@@ -263,6 +313,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values(["traj_ind", "time_stamp"])
 
     has_label = "label" in df.columns
+    n_trajectories = df["traj_ind"].nunique()
+    logger.info("Building features for %d trajectories...", n_trajectories)
 
     groups = df.groupby("traj_ind", sort=False)
 
@@ -275,4 +327,5 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         records.append(feats)
 
     result = pd.DataFrame(records).set_index("traj_ind")
+    logger.info("Feature matrix built: shape=%s", result.shape)
     return result

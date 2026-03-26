@@ -1,7 +1,8 @@
-"""
-Orchestrator: Load -> Features -> Train -> Predict -> Export.
+"""Pipeline orchestrator: Load -> Features -> Train -> Predict -> Export.
 
-Produces submission.csv matching sample_submission.csv format:
+Produces ``submission.csv`` in the project root matching the format of
+``data/sample_submission.csv``:
+
     columns: label, trajectory_ind
 """
 
@@ -20,7 +21,6 @@ from features import build_features
 from model import predict, train_with_cv
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 OUTPUT_PATH = Path(__file__).parent.parent / "submission.csv"
@@ -29,6 +29,16 @@ FEATURE_CACHE_TEST = Path(__file__).parent.parent / "cache_test_features.parquet
 
 
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load raw CSV data from the data directory.
+
+    Returns:
+        A tuple of three DataFrames:
+            - train: Labelled point-level trajectory data with columns
+              ``label``, ``time_stamp``, ``traj_ind``, ``x``, ``y``, ``z``.
+            - test: Unlabelled point-level trajectory data (no ``label`` column).
+            - sample_sub: Sample submission DataFrame with columns
+              ``label`` and ``trajectory_ind``, used for output formatting.
+    """
     logger.info("Loading raw data...")
     train = pd.read_csv(DATA_DIR / "train.csv")
     test = pd.read_csv(DATA_DIR / "test.csv")
@@ -39,6 +49,24 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def get_features(df: pd.DataFrame, cache_path: Path, name: str) -> pd.DataFrame:
+    """Return per-trajectory feature matrix, loading from Parquet cache if available.
+
+    On first run the features are computed from raw point-level data and
+    persisted to ``cache_path`` as a Parquet file. Subsequent runs load
+    directly from cache, reducing runtime from ~96 seconds to under 1 second
+    for the training split.
+
+    Args:
+        df: Raw point-level DataFrame passed to ``build_features`` when
+            the cache does not exist.
+        cache_path: Filesystem path where the Parquet cache is stored or
+            will be written.
+        name: Human-readable split name (e.g. ``"train"`` or ``"test"``)
+            used in log messages.
+
+    Returns:
+        Per-trajectory feature DataFrame indexed by ``traj_ind``.
+    """
     if cache_path.exists():
         logger.info("Loading %s features from cache: %s", name, cache_path)
         return pd.read_parquet(cache_path)
@@ -51,6 +79,15 @@ def get_features(df: pd.DataFrame, cache_path: Path, name: str) -> pd.DataFrame:
 
 
 def main() -> None:
+    """Run the full classification pipeline end-to-end.
+
+    Executes five sequential stages:
+        1. Load raw CSV data.
+        2. Engineer per-trajectory features (with Parquet caching).
+        3. Train XGBoost with 5-fold GroupKFold cross-validation.
+        4. Generate predictions for the test set.
+        5. Export ``submission.csv`` matching the sample submission format.
+    """
     t_start = time.time()
 
     # --- Step 1: Load ---
@@ -126,4 +163,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     main()

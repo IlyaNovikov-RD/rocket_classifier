@@ -1,15 +1,18 @@
-"""
-XGBoost classifier for rocket trajectory classification.
+"""XGBoost classifier for rocket trajectory classification.
 
-Metric: min over classes j of (recall_j)
-  = min_j [ #{correctly predicted as j AND true label j} / #{true label j} ]
-This is the minimum per-class recall — we must not be bad at any single class.
+Metric:
+    min over classes j of (recall_j)
+    = min_j [ #{correctly predicted as j AND true label j} / #{true label j} ]
+
+    This is the minimum per-class recall. The system must not be bad at any
+    single rocket class, so worst-case recall across all classes is the
+    binding constraint.
 
 Strategy:
-- Use GroupKFold on traj_ind to prevent data leakage.
-- Tune class_weight via scale_pos_weight / sample_weight to boost recall on
-  minority classes (label 2 is rarest).
-- Report per-class recall and the min-recall metric after CV.
+    - GroupKFold on traj_ind prevents data leakage between train and validation.
+    - Inverse-frequency sample weights boost recall on minority classes
+      (label 2 is the rarest at ~7% of trajectories).
+    - Per-fold logging reports both the aggregate score and per-class breakdown.
 """
 
 import logging
@@ -21,20 +24,22 @@ from sklearn.model_selection import GroupKFold
 from xgboost import XGBClassifier
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 def min_class_recall(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Compute minimum per-class recall across all classes.
+    """Compute the minimum per-class recall across all classes.
 
-    This is the official evaluation metric from the assignment.
+    This is the official evaluation metric for the assignment. It returns
+    the recall of the worst-performing class, ensuring the model is not
+    evaluated favourably when it fails on a minority class.
 
     Args:
-        y_true: Ground-truth labels array.
-        y_pred: Predicted labels array.
+        y_true: Ground-truth integer labels array of shape (N,).
+        y_pred: Predicted integer labels array of shape (N,).
 
     Returns:
-        Scalar in [0, 1]: minimum recall over all classes present in y_true.
+        A scalar in [0.0, 1.0] representing the minimum recall over all
+        classes present in ``y_true``.
     """
     classes = np.unique(y_true)
     recalls = []
@@ -48,7 +53,21 @@ def min_class_recall(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 
 def _compute_sample_weights(y: np.ndarray) -> np.ndarray:
-    """Inverse-frequency sample weights to balance minority classes."""
+    """Compute inverse-frequency sample weights to balance minority classes.
+
+    Each sample receives a weight inversely proportional to its class
+    frequency: ``w_i = N / (K * N_j)`` where N is the total number of
+    samples, K is the number of classes, and N_j is the count of class j.
+    This is equivalent to upweighting rare classes without synthetic
+    oversampling (SMOTE), preserving the original feature distribution.
+
+    Args:
+        y: Integer class label array of shape (N,).
+
+    Returns:
+        Float32 weight array of shape (N,) where samples from minority
+        classes receive higher weights.
+    """
     classes, counts = np.unique(y, return_counts=True)
     freq = dict(zip(classes, counts, strict=True))
     n = len(y)
@@ -64,20 +83,30 @@ def train_with_cv(
     n_splits: int = 5,
     xgb_params: dict | None = None,
 ) -> tuple[XGBClassifier, list[float]]:
-    """Train XGBoost with GroupKFold CV, logging per-fold min-recall.
+    """Train XGBoost with GroupKFold cross-validation, logging per-fold results.
 
-    Data leakage prevention: GroupKFold ensures all points of a trajectory
-    are in either train or validation, never both.
+    Data leakage prevention: ``GroupKFold`` on ``traj_ind`` ensures that all
+    radar points belonging to a single trajectory appear exclusively in either
+    the training set or the validation set within each fold — never both.
+    After cross-validation, the model is retrained on the full dataset.
 
     Args:
-        X:          Feature matrix (per-trajectory).
-        y:          Integer labels array.
-        groups:     Group array (traj_ind) matching X rows.
-        n_splits:   Number of CV folds.
-        xgb_params: Optional XGBoost hyperparameters override.
+        X: Per-trajectory feature DataFrame. Rows correspond to trajectories;
+            columns are physics features. Must not contain a ``"label"``
+            column (it is filtered out internally if present).
+        y: Integer class label array of shape (n_trajectories,). Valid values
+            are 0, 1, and 2.
+        groups: Group identifier array of shape (n_trajectories,) containing
+            ``traj_ind`` values. Passed directly to ``GroupKFold.split()``.
+        n_splits: Number of cross-validation folds. Defaults to 5.
+        xgb_params: Optional dictionary of XGBoost hyperparameters that
+            overrides the defaults. Partial overrides are supported.
 
     Returns:
-        Tuple of (model trained on full data, list of per-fold min-recall scores).
+        A tuple of:
+            - model: ``XGBClassifier`` retrained on the full dataset.
+            - fold_scores: List of per-fold min-recall scores of length
+              ``n_splits``.
     """
     feature_cols = [c for c in X.columns if c != "label"]
     X_vals = X[feature_cols].to_numpy(dtype=np.float32)
@@ -157,14 +186,17 @@ def train_with_cv(
 
 
 def predict(model: XGBClassifier, X: pd.DataFrame) -> np.ndarray:
-    """Generate predictions for the given feature matrix.
+    """Generate class predictions for the given feature matrix.
 
     Args:
-        model: Trained XGBClassifier.
-        X:     Feature DataFrame (same columns as training, without 'label').
+        model: Fitted ``XGBClassifier`` instance returned by
+            ``train_with_cv``.
+        X: Per-trajectory feature DataFrame with the same columns used
+            during training. A ``"label"`` column is ignored if present.
 
     Returns:
-        Integer array of predicted labels.
+        Integer array of shape (n_trajectories,) with predicted class labels
+        in {0, 1, 2}.
     """
     feature_cols = [c for c in X.columns if c != "label"]
     X_vals = X[feature_cols].to_numpy(dtype=np.float32)
