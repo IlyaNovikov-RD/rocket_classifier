@@ -7,6 +7,7 @@ Produces ``submission.csv`` in the project root matching the format of
 """
 
 import logging
+import pickle
 import sys
 import time
 from pathlib import Path
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 OUTPUT_PATH = Path(__file__).parent.parent / "submission.csv"
+MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
 FEATURE_CACHE_TRAIN = Path(__file__).parent.parent / "cache_train_features.parquet"
 FEATURE_CACHE_TEST = Path(__file__).parent.parent / "cache_test_features.parquet"
 
@@ -123,6 +125,11 @@ def main() -> None:
     # --- Step 3: Train with CV ---
     model, fold_scores = train_with_cv(X_train, y_train, groups, n_splits=5)
     logger.info("Final CV min-recall scores: %s", [f"{s:.4f}" for s in fold_scores])
+
+    # Persist the trained model for the Streamlit demo (src/app.py)
+    with MODEL_PATH.open("wb") as f:
+        pickle.dump(model, f)
+    logger.info("Model saved to: %s", MODEL_PATH)
 
     # --- Step 4: Predict ---
     y_pred = predict(model, X_test)

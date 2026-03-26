@@ -18,6 +18,7 @@ ignore = [
     "B008",  # do not perform function calls in default arguments
     "N803",  # ML convention: uppercase X for feature matrix (sklearn standard)
     "N806",  # ML convention: uppercase X_train, X_test, X_vals in function scope
+    "C408",  # Plotly API uses dict() heavily — dict() is more readable than {} for kwargs
 ]
 
 [lint.isort]

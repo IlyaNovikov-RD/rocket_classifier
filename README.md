@@ -46,7 +46,28 @@ Output: `submission.csv` in the project root.
 
 ---
 
-### Option 2 — Docker
+### Option 2 — Interactive Web Demo (Streamlit)
+
+After running the pipeline once (to train and save `model.pkl`), launch the
+interactive demo in your browser:
+
+```bash
+poetry run streamlit run src/app.py
+```
+
+The app opens at `http://localhost:8501` and lets you:
+
+- **Drag sliders** for *Initial Speed*, *Thrust Acceleration*, and *Measurement Noise*
+- Watch the **Plotly 3D trajectory** update in real time as parameters change
+- See the **predicted class** and **confidence score** recalculated on every slider move
+- Compare **per-class probability bars** for all three rocket classes
+
+> **Note:** `model.pkl` is generated automatically at the end of `src/main.py`.
+> Run the full pipeline at least once before launching the demo.
+
+---
+
+### Option 3 — Docker
 
 **Prerequisites:** [Docker](https://docs.docker.com/get-docker/)
 
