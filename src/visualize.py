@@ -14,10 +14,11 @@ import sys
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")  # headless rendering, no display required
 
-import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -31,6 +32,7 @@ RNG = np.random.default_rng(seed=42)
 # ---------------------------------------------------------------------------
 # Synthetic trajectory generation
 # ---------------------------------------------------------------------------
+
 
 def generate_rocket(n: int = 120, dt: float = 0.05) -> tuple[np.ndarray, np.ndarray]:
     """Ballistic parabolic trajectory with initial high-thrust phase.
@@ -102,6 +104,7 @@ def generate_noise(n: int = 120, dt: float = 0.05) -> tuple[np.ndarray, np.ndarr
 # Feature extraction using production code
 # ---------------------------------------------------------------------------
 
+
 def compute_jerk_magnitude(pos: np.ndarray, dt_arr: np.ndarray) -> np.ndarray:
     """Return per-sample jerk magnitude using _compute_derivatives from features.py."""
     _, _, jerk = _compute_derivatives(pos, dt_arr)
@@ -113,6 +116,7 @@ def compute_jerk_magnitude(pos: np.ndarray, dt_arr: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Plot
 # ---------------------------------------------------------------------------
+
 
 def make_demo_plot(output_path: Path) -> None:
     rocket_pos, rocket_dt = generate_rocket()
@@ -135,24 +139,26 @@ def make_demo_plot(output_path: Path) -> None:
     fig.patch.set_facecolor("#0d1117")
 
     gs = gridspec.GridSpec(
-        1, 2,
+        1,
+        2,
         figure=fig,
-        left=0.04, right=0.97,
-        top=0.88, bottom=0.10,
+        left=0.04,
+        right=0.97,
+        top=0.88,
+        bottom=0.10,
         wspace=0.32,
     )
 
     ax3d = fig.add_subplot(gs[0], projection="3d")
     ax2d = fig.add_subplot(gs[1])
 
-    DARK_BG    = "#0d1117"
-    PANEL_BG   = "#161b22"
+    DARK_BG = "#0d1117"
+    PANEL_BG = "#161b22"
     GRID_COLOR = "#30363d"
     TEXT_COLOR = "#e6edf3"
-    GREEN      = "#3fb950"
-    RED        = "#f85149"
-    GOLD       = "#f0c040"
-    BLUE_MUTED = "#58a6ff"
+    GREEN = "#3fb950"
+    RED = "#f85149"
+    GOLD = "#f0c040"
 
     # ---------------------------------------------------------------- 3D panel
     for ax in [ax3d]:
@@ -168,41 +174,64 @@ def make_demo_plot(output_path: Path) -> None:
         ax.zaxis.label.set_color(TEXT_COLOR)
 
     ax3d.plot(
-        rocket_pos[:, 0], rocket_pos[:, 1], rocket_pos[:, 2],
-        color=GREEN, linewidth=2.2, linestyle="-", label="Rocket (Ballistic)",
+        rocket_pos[:, 0],
+        rocket_pos[:, 1],
+        rocket_pos[:, 2],
+        color=GREEN,
+        linewidth=2.2,
+        linestyle="-",
+        label="Rocket (Ballistic)",
         zorder=3,
     )
     ax3d.plot(
-        noise_pos[:, 0], noise_pos[:, 1], noise_pos[:, 2],
-        color=RED, linewidth=1.6, linestyle="--", alpha=0.85, label="Other (Noise)",
+        noise_pos[:, 0],
+        noise_pos[:, 1],
+        noise_pos[:, 2],
+        color=RED,
+        linewidth=1.6,
+        linestyle="--",
+        alpha=0.85,
+        label="Other (Noise)",
         zorder=2,
     )
 
     # Launch markers
     ax3d.scatter(*rocket_pos[0], color=GREEN, s=60, zorder=5, depthshade=False)
-    ax3d.scatter(*noise_pos[0],  color=RED,   s=60, zorder=5, depthshade=False)
+    ax3d.scatter(*noise_pos[0], color=RED, s=60, zorder=5, depthshade=False)
 
     # Apogee marker
     ax3d.scatter(
         *rocket_pos[apogee_idx],
-        color=GOLD, s=120, marker="*", zorder=6, depthshade=False, label="Apogee",
+        color=GOLD,
+        s=120,
+        marker="*",
+        zorder=6,
+        depthshade=False,
+        label="Apogee",
     )
     ax3d.text(
         rocket_pos[apogee_idx, 0] + 1.5,
         rocket_pos[apogee_idx, 1] + 1.5,
         rocket_pos[apogee_idx, 2] + 2.0,
-        "Apogee", color=GOLD, fontsize=9, fontweight="bold",
+        "Apogee",
+        color=GOLD,
+        fontsize=9,
+        fontweight="bold",
     )
 
     ax3d.set_xlabel("X (m)", labelpad=6, fontsize=9)
     ax3d.set_ylabel("Y (m)", labelpad=6, fontsize=9)
     ax3d.set_zlabel("Z — Altitude (m)", labelpad=6, fontsize=9)
-    ax3d.set_title("3D Trajectory Comparison", color=TEXT_COLOR,
-                   fontsize=13, fontweight="bold", pad=12)
+    ax3d.set_title(
+        "3D Trajectory Comparison", color=TEXT_COLOR, fontsize=13, fontweight="bold", pad=12
+    )
 
-    leg3d = ax3d.legend(
-        loc="upper left", fontsize=9,
-        facecolor=PANEL_BG, edgecolor=GRID_COLOR, labelcolor=TEXT_COLOR,
+    ax3d.legend(
+        loc="upper left",
+        fontsize=9,
+        facecolor=PANEL_BG,
+        edgecolor=GRID_COLOR,
+        labelcolor=TEXT_COLOR,
     )
 
     ax3d.view_init(elev=22, azim=-55)
@@ -215,12 +244,21 @@ def make_demo_plot(output_path: Path) -> None:
     ax2d.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.7)
 
     ax2d.plot(
-        t_jerk_rocket, rocket_jerk,
-        color=GREEN, linewidth=2.0, linestyle="-", label="Rocket (Ballistic)",
+        t_jerk_rocket,
+        rocket_jerk,
+        color=GREEN,
+        linewidth=2.0,
+        linestyle="-",
+        label="Rocket (Ballistic)",
     )
     ax2d.plot(
-        t_jerk_noise, noise_jerk,
-        color=RED, linewidth=1.4, linestyle="--", alpha=0.85, label="Other (Noise)",
+        t_jerk_noise,
+        noise_jerk,
+        color=RED,
+        linewidth=1.4,
+        linestyle="--",
+        alpha=0.85,
+        label="Other (Noise)",
     )
 
     # Annotate the thrust-ignition jerk spike
@@ -229,25 +267,38 @@ def make_demo_plot(output_path: Path) -> None:
         "Thrust\nIgnition\nSpike",
         xy=(t_jerk_rocket[peak_idx], rocket_jerk[peak_idx]),
         xytext=(t_jerk_rocket[peak_idx] + 0.4, rocket_jerk[peak_idx] * 0.85),
-        color=GOLD, fontsize=8.5, fontweight="bold",
-        arrowprops=dict(arrowstyle="->", color=GOLD, lw=1.5),
+        color=GOLD,
+        fontsize=8.5,
+        fontweight="bold",
+        arrowprops={"arrowstyle": "->", "color": GOLD, "lw": 1.5},
     )
 
     ax2d.set_xlabel("Time (s)", color=TEXT_COLOR, fontsize=11, labelpad=6)
     ax2d.set_ylabel("Jerk Magnitude  (m/s³)", color=TEXT_COLOR, fontsize=11, labelpad=6)
-    ax2d.set_title("Jerk Magnitude Over Time\n(Computed via Finite Differences)",
-                   color=TEXT_COLOR, fontsize=13, fontweight="bold", pad=12)
+    ax2d.set_title(
+        "Jerk Magnitude Over Time\n(Computed via Finite Differences)",
+        color=TEXT_COLOR,
+        fontsize=13,
+        fontweight="bold",
+        pad=12,
+    )
     ax2d.tick_params(axis="x", colors=TEXT_COLOR)
     ax2d.tick_params(axis="y", colors=TEXT_COLOR)
 
-    leg2d = ax2d.legend(
-        fontsize=9, facecolor=PANEL_BG, edgecolor=GRID_COLOR, labelcolor=TEXT_COLOR,
+    ax2d.legend(
+        fontsize=9,
+        facecolor=PANEL_BG,
+        edgecolor=GRID_COLOR,
+        labelcolor=TEXT_COLOR,
     )
 
     # ------------------------------------------------------------------ title
     fig.suptitle(
         "Physics-Informed Feature Visualization",
-        color=TEXT_COLOR, fontsize=17, fontweight="bold", y=0.97,
+        color=TEXT_COLOR,
+        fontsize=17,
+        fontweight="bold",
+        y=0.97,
     )
 
     fig.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=DARK_BG)

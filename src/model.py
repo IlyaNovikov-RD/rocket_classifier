@@ -13,13 +13,11 @@ Strategy:
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import GroupKFold
 from sklearn.metrics import confusion_matrix
-from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import GroupKFold
 from xgboost import XGBClassifier
 
 logger = logging.getLogger(__name__)
@@ -52,7 +50,7 @@ def min_class_recall(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 def _compute_sample_weights(y: np.ndarray) -> np.ndarray:
     """Inverse-frequency sample weights to balance minority classes."""
     classes, counts = np.unique(y, return_counts=True)
-    freq = dict(zip(classes, counts))
+    freq = dict(zip(classes, counts, strict=True))
     n = len(y)
     n_classes = len(classes)
     weights = np.array([n / (n_classes * freq[c]) for c in y], dtype=np.float32)
@@ -64,7 +62,7 @@ def train_with_cv(
     y: np.ndarray,
     groups: np.ndarray,
     n_splits: int = 5,
-    xgb_params: Optional[dict] = None,
+    xgb_params: dict | None = None,
 ) -> tuple[XGBClassifier, list[float]]:
     """Train XGBoost with GroupKFold CV, logging per-fold min-recall.
 
@@ -132,17 +130,21 @@ def train_with_cv(
         per_class = []
         for i in range(3):
             denom = cm[i].sum()
-            per_class.append(f"class{i}={cm[i, i]/denom:.3f}" if denom > 0 else f"class{i}=N/A")
+            per_class.append(f"class{i}={cm[i, i] / denom:.3f}" if denom > 0 else f"class{i}=N/A")
 
         logger.info(
             "Fold %d/%d | min-recall=%.4f | %s",
-            fold, n_splits, score, "  ".join(per_class),
+            fold,
+            n_splits,
+            score,
+            "  ".join(per_class),
         )
         fold_scores.append(score)
 
     logger.info(
         "CV min-recall: %.4f ± %.4f (mean ± std)",
-        np.mean(fold_scores), np.std(fold_scores),
+        np.mean(fold_scores),
+        np.std(fold_scores),
     )
 
     # Retrain on full data
