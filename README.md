@@ -55,6 +55,9 @@ Raw radar pings are aggregated into 76 scalar features per trajectory using fini
 ### Artifact Retrieval from GitHub Releases
 `model.pkl` is published as a binary asset on the [v1.0.0 GitHub Release](https://github.com/IlyaNovikov-RD/rocket_classifier/releases/tag/v1.0.0). The Streamlit demo automatically downloads and caches it at startup when no local file is present — making the app deployable to any cloud environment (Streamlit Community Cloud, Docker, bare VM) without pre-running the training pipeline.
 
+### Dynamic Artifact Retrieval
+To maintain a lightweight repository and follow MLOps best practices, the XGBoost model binary is NOT tracked in Git. Instead, the Streamlit application features a dynamic retrieval layer that fetches the `model.pkl` directly from GitHub Release assets (v1.0.0) upon startup. This ensures a clean separation between code and model artifacts while enabling seamless one-click deployment to any environment.
+
 ### Pydantic Data Contracts
 `src/schema.py` defines `TrajectoryPoint` (Pydantic v2 `BaseModel`) with enforced constraints: `z ≥ 0` (altitude cannot be negative), `label ∈ {0, 1, 2}`, `extra = "forbid"` to catch schema drift immediately. `validate_dataframe()` bulk-validates any raw DataFrame and returns `(valid_records, errors)` for graceful handling of bad rows.
 
