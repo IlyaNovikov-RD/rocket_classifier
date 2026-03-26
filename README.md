@@ -15,9 +15,13 @@ rocket_classifier/
 │   ├── test.csv                   # Unlabeled trajectory point data
 │   └── sample_submission.csv      # Expected submission format
 ├── src/
+│   ├── schema.py                  # Pydantic data contracts (TrajectoryPoint)
 │   ├── features.py                # Physics-based feature engineering
 │   ├── model.py                   # XGBoost classifier + CV evaluation
-│   └── main.py                    # Pipeline orchestrator
+│   ├── main.py                    # Pipeline orchestrator
+│   ├── app.py                     # Streamlit interactive demo
+│   └── interpret.py               # SHAP model interpretability
+├── Makefile                       # Developer automation (install/test/lint/demo)
 ├── pyproject.toml                 # Poetry dependency manifest
 ├── poetry.lock                    # Pinned dependency versions
 ├── Dockerfile                     # Containerized runtime
@@ -27,6 +31,33 @@ rocket_classifier/
 ---
 
 ## Quickstart
+
+### Option 0 — Makefile (recommended)
+
+**Prerequisites:** Python 3.11+, [Poetry](https://python-poetry.org/docs/#installation), `make`
+
+All common workflows are covered by a single `Makefile` in the project root:
+
+```bash
+make install   # Install all dependencies into the Poetry virtualenv
+make test      # Run the full pytest suite (55 unit tests)
+make lint      # Check code quality with ruff
+make format    # Auto-format all source files with ruff
+make demo      # Launch the Streamlit interactive demo at localhost:8501
+```
+
+Run the full pipeline (feature engineering → training → submission):
+
+```bash
+poetry run python src/main.py   # generates submission.csv and model.pkl
+make demo                       # launch the live demo once model.pkl exists
+```
+
+> **Windows users:** `make` is available via [Git for Windows](https://gitforwindows.org/),
+> [Chocolatey](https://chocolatey.org/) (`choco install make`), or
+> [winget](https://learn.microsoft.com/en-us/windows/package-manager/) (`winget install GnuWin32.Make`).
+
+---
 
 ### Option 1 — Local (Poetry)
 
