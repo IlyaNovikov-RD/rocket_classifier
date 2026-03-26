@@ -1,15 +1,18 @@
+"""Demo visualization of physics-informed trajectory features.
+
+Generates ``demo.png`` in the project root containing two subplots:
+
+    - Left:  3D trajectory comparison — ballistic Rocket (solid green) vs.
+             stochastic Noise/Other (dashed red), with apogee marked.
+    - Right: Time-series of Jerk Magnitude computed via finite differences,
+             illustrating the sharp ignition spike that distinguishes propelled
+             rockets from passive or erratic objects.
+
+Uses ``_compute_derivatives`` from ``src/features.py`` directly so that the
+visualization reflects the same physics code path used in production.
 """
-Generate a professional demo visualization of physics-informed features.
 
-Produces demo.png in the project root with:
-  - Left:  3D trajectory plot comparing a ballistic Rocket vs. a Noisy/Other trajectory.
-  - Right: Time-series of Jerk Magnitude, showing how clean ballistic physics
-           produces a characteristic signature vs. high-frequency noise.
-
-Uses _compute_derivatives from src/features.py to derive acceleration and jerk
-directly from synthetic position/time data — the same code path used in production.
-"""
-
+import logging
 import sys
 from pathlib import Path
 
@@ -24,6 +27,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from features import _compute_derivatives
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Reproducibility
 # ---------------------------------------------------------------------------
@@ -35,20 +40,26 @@ RNG = np.random.default_rng(seed=42)
 
 
 def generate_rocket(n: int = 120, dt: float = 0.05) -> tuple[np.ndarray, np.ndarray]:
-    """Ballistic parabolic trajectory with initial high-thrust phase.
+    """Generate a synthetic ballistic trajectory with an initial thrust phase.
 
-    Physics:
-      x(t) = v0x * t
-      y(t) = v0y * t
-      z(t) = v0z * t - 0.5 * g * t^2   (standard ballistic, flat terrain)
+    Models standard flat-terrain ballistic flight (Shtuchia assumption):
+        x(t) = v0x * t
+        y(t) = v0y * t
+        z(t) = v0z * t - 0.5 * g * t^2
 
-    A brief thrust phase (first 10% of flight) adds extra upward acceleration,
-    giving the jerk a sharp, distinctive spike at ignition — a real-world
-    signature that differentiates propelled rockets from passive projectiles.
+    A brief motor-burn phase in the first 10% of flight applies additional
+    upward acceleration, producing the sharp jerk spike at ignition that
+    is a key discriminating feature for propelled rockets.
+
+    Args:
+        n: Number of position samples to generate. Defaults to 120.
+        dt: Time step in seconds between consecutive samples. Defaults to
+            0.05 s (20 Hz radar sampling rate).
 
     Returns:
-        pos: (n, 3) position array [x, y, z]
-        dt_arr: (n-1,) uniform time delta array
+        A tuple of:
+            - pos: Position array of shape (n, 3) with columns [x, y, z].
+            - dt_arr: Uniform time delta array of shape (n-1,) in seconds.
     """
     g = 9.81
     v0x, v0y, v0z = 18.0, 12.0, 55.0
@@ -75,16 +86,22 @@ def generate_rocket(n: int = 120, dt: float = 0.05) -> tuple[np.ndarray, np.ndar
 
 
 def generate_noise(n: int = 120, dt: float = 0.05) -> tuple[np.ndarray, np.ndarray]:
-    """High-jitter random-walk trajectory (non-ballistic / unknown object).
+    """Generate a high-jitter stochastic trajectory (non-ballistic object).
 
-    Simulates an erratic trajectory with no clear ballistic arc:
-    high-frequency direction changes, irregular speed, no smooth apogee.
+    Simulates an erratic flight path with no coherent ballistic arc:
+    large random perturbations at each step, irregular speed, and no
+    well-defined apogee. Representative of unknown or jamming objects.
+
+    Args:
+        n: Number of position samples to generate. Defaults to 120.
+        dt: Time step in seconds between consecutive samples. Defaults to
+            0.05 s.
 
     Returns:
-        pos: (n, 3) position array [x, y, z]
-        dt_arr: (n-1,) uniform time delta array
+        A tuple of:
+            - pos: Position array of shape (n, 3) with columns [x, y, z].
+            - dt_arr: Uniform time delta array of shape (n-1,) in seconds.
     """
-    # Slow drift with large stochastic perturbations
     base_vx = RNG.uniform(5, 15)
     base_vz = RNG.uniform(2, 8)
 
@@ -106,7 +123,20 @@ def generate_noise(n: int = 120, dt: float = 0.05) -> tuple[np.ndarray, np.ndarr
 
 
 def compute_jerk_magnitude(pos: np.ndarray, dt_arr: np.ndarray) -> np.ndarray:
-    """Return per-sample jerk magnitude using _compute_derivatives from features.py."""
+    """Compute per-timestep jerk magnitude using the production derivative pipeline.
+
+    Delegates to ``_compute_derivatives`` from ``features.py`` to ensure the
+    visualization uses exactly the same finite-difference logic as the
+    production feature engineering step.
+
+    Args:
+        pos: Position array of shape (N, 3).
+        dt_arr: Time delta array of shape (N-1,) in seconds.
+
+    Returns:
+        1-D array of jerk magnitudes of shape (N-3,). Returns an empty
+        array if fewer than 4 position samples are provided.
+    """
     _, _, jerk = _compute_derivatives(pos, dt_arr)
     if jerk.shape[0] == 0:
         return np.array([])
@@ -119,6 +149,17 @@ def compute_jerk_magnitude(pos: np.ndarray, dt_arr: np.ndarray) -> np.ndarray:
 
 
 def make_demo_plot(output_path: Path) -> None:
+    """Render and save the two-panel physics feature visualization.
+
+    Generates synthetic rocket and noise trajectories, computes jerk via
+    the production derivative pipeline, and produces a dark-themed figure
+    with a 3D trajectory subplot and a jerk magnitude time-series subplot.
+    The figure is saved as a PNG at ``output_path``.
+
+    Args:
+        output_path: Filesystem path where the PNG will be written.
+            Parent directory must exist.
+    """
     rocket_pos, rocket_dt = generate_rocket()
     noise_pos, noise_dt = generate_noise()
 
@@ -127,7 +168,6 @@ def make_demo_plot(output_path: Path) -> None:
 
     # Time axes for jerk (jerk has n-3 samples from n points)
     dt = rocket_dt[0]
-    # jerk starts at index 1.5 (midpoint of midpoint) — use a simple offset
     t_jerk_rocket = np.arange(len(rocket_jerk)) * dt
     t_jerk_noise = np.arange(len(noise_jerk)) * dt
 
@@ -302,9 +342,10 @@ def make_demo_plot(output_path: Path) -> None:
     )
 
     fig.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=DARK_BG)
-    print(f"Saved: {output_path}")
+    logger.info("Demo plot saved: %s", output_path)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     output = Path(__file__).parent.parent / "demo.png"
     make_demo_plot(output)
