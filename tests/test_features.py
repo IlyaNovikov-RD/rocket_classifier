@@ -1,0 +1,613 @@
+"""
+Comprehensive unit tests for src/features.py.
+
+Coverage targets:
+- _compute_derivatives: shapes, known physics values, boundary point counts, dt=0
+- _safe_stats: empty array, single value, normal array
+- _extract_trajectory_features: 1/2/3/4+ point trajectories, vertical launch,
+  duplicate timestamps, key completeness, apogee correctness
+- build_features: with and without label, multi-trajectory aggregation
+"""
+
+import math
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+# Allow importing from src/ without installing the package
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from features import (
+    _compute_derivatives,
+    _extract_trajectory_features,
+    _safe_stats,
+    build_features,
+)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_group(
+    xs: list[float],
+    ys: list[float],
+    zs: list[float],
+    dt_seconds: list[float] | None = None,
+    base_ts: str = "2024-01-01 00:00:00",
+) -> pd.DataFrame:
+    """Build a minimal trajectory DataFrame for _extract_trajectory_features."""
+    n = len(xs)
+    if dt_seconds is None:
+        # Default: 0.05-second intervals
+        dt_seconds = [0.05] * (n - 1)
+
+    timestamps = [pd.Timestamp(base_ts)]
+    for dt in dt_seconds:
+        timestamps.append(timestamps[-1] + pd.Timedelta(seconds=dt))
+
+    return pd.DataFrame(
+        {
+            "time_stamp": timestamps,
+            "x": xs,
+            "y": ys,
+            "z": zs,
+        }
+    )
+
+
+# The full set of feature keys _extract_trajectory_features must always return.
+# Derived from the implementation's two code paths (with / without derivatives).
+_ALWAYS_PRESENT = {
+    "n_points",
+    "total_duration_s",
+    "dt_mean", "dt_std", "dt_min", "dt_max", "dt_median",
+    "apogee_z", "initial_z", "final_z", "delta_z_total", "apogee_relative",
+    "apogee_time_frac", "time_to_apogee_s",
+    "x_range", "y_range", "z_range",
+    "max_horiz_range", "final_horiz_range",
+    "path_length_3d",
+    "launch_x", "launch_y", "launch_z",
+}
+
+_DERIVATIVE_KEYS = {
+    "speed_mean", "speed_std", "speed_min", "speed_max", "speed_median",
+    "vx_mean", "vx_std", "vx_min", "vx_max", "vx_median",
+    "vy_mean", "vy_std", "vy_min", "vy_max", "vy_median",
+    "vz_mean", "vz_std", "vz_min", "vz_max", "vz_median",
+    "v_horiz_mean", "v_horiz_std", "v_horiz_min", "v_horiz_max", "v_horiz_median",
+    "acc_mag_mean", "acc_mag_std", "acc_mag_min", "acc_mag_max", "acc_mag_median",
+    "az_mean", "az_std", "az_min", "az_max", "az_median",
+    "acc_horiz_mean", "acc_horiz_std", "acc_horiz_min", "acc_horiz_max", "acc_horiz_median",
+    "mean_az",
+    "jerk_mag_mean", "jerk_mag_std", "jerk_mag_min", "jerk_mag_max", "jerk_mag_median",
+    "launch_angle_elev", "launch_angle_azimuth",
+    "initial_speed", "initial_vz", "initial_v_horiz",
+    "final_speed", "final_vz",
+}
+
+ALL_EXPECTED_KEYS = _ALWAYS_PRESENT | _DERIVATIVE_KEYS
+
+
+# ===========================================================================
+# _compute_derivatives
+# ===========================================================================
+
+
+class TestComputeDerivatives:
+
+    def test_shapes_five_points(self):
+        """N=5 → vel(4,3), acc(3,3), jerk(2,3)."""
+        pos = np.arange(15, dtype=float).reshape(5, 3)
+        dt = np.full(4, 1.0)
+        vel, acc, jerk = _compute_derivatives(pos, dt)
+        assert vel.shape == (4, 3)
+        assert acc.shape == (3, 3)
+        assert jerk.shape == (2, 3)
+
+    def test_shapes_four_points(self):
+        """N=4 → vel(3,3), acc(2,3), jerk(1,3)."""
+        pos = np.arange(12, dtype=float).reshape(4, 3)
+        dt = np.full(3, 1.0)
+        vel, acc, jerk = _compute_derivatives(pos, dt)
+        assert vel.shape == (3, 3)
+        assert acc.shape == (2, 3)
+        assert jerk.shape == (1, 3)
+
+    def test_shapes_three_points(self):
+        """N=3 → vel(2,3), acc(1,3), jerk empty(0,3).
+        acc.shape[0]==1 < 2, so jerk path returns early."""
+        pos = np.arange(9, dtype=float).reshape(3, 3)
+        dt = np.full(2, 1.0)
+        vel, acc, jerk = _compute_derivatives(pos, dt)
+        assert vel.shape == (2, 3)
+        assert acc.shape == (1, 3)
+        assert jerk.shape == (0, 3)
+
+    def test_shapes_two_points(self):
+        """N=2 → vel(1,3), acc empty(0,3), jerk empty(0,3).
+        vel.shape[0]==1 < 2, so early return."""
+        pos = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 3.0]])
+        dt = np.array([1.0])
+        vel, acc, jerk = _compute_derivatives(pos, dt)
+        assert vel.shape == (1, 3)
+        assert acc.shape == (0, 3)
+        assert jerk.shape == (0, 3)
+
+    def test_uniform_motion_zero_acceleration(self):
+        """Constant velocity → acceleration should be (near) zero."""
+        # pos moves +1 in x each second for 5 steps
+        pos = np.column_stack([np.arange(6, dtype=float),
+                                np.zeros(6), np.zeros(6)])
+        dt = np.ones(5)
+        vel, acc, jerk = _compute_derivatives(pos, dt)
+        # All velocities should be [1, 0, 0]
+        np.testing.assert_allclose(vel, np.tile([1.0, 0.0, 0.0], (5, 1)), atol=1e-10)
+        # Acceleration should be zero for uniform motion
+        np.testing.assert_allclose(acc, 0.0, atol=1e-10)
+
+    def test_constant_acceleration(self):
+        """Ballistic fall: z(t) = z0 - 0.5*g*t^2 → az ≈ -g everywhere."""
+        g = 9.81
+        t = np.arange(6) * 0.1            # 0, 0.1, ..., 0.5 s
+        z = 100.0 - 0.5 * g * t ** 2
+        pos = np.column_stack([np.zeros(6), np.zeros(6), z])
+        dt = np.full(5, 0.1)
+        vel, acc, jerk = _compute_derivatives(pos, dt)
+        # Vertical acceleration should be close to -g
+        np.testing.assert_allclose(acc[:, 2], -g, rtol=1e-6)
+
+    def test_dt_zero_produces_inf(self):
+        """dt=0 is NOT sanitized inside _compute_derivatives itself.
+        The caller (_extract_trajectory_features) is responsible for sanitization.
+        This test documents the raw behavior: division by zero → inf/nan."""
+        pos = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+        dt = np.array([0.0])
+        vel, _, _ = _compute_derivatives(pos, dt)
+        assert not np.isfinite(vel).all(), (
+            "dt=0 should produce non-finite velocity; "
+            "sanitization is the caller's responsibility"
+        )
+
+    def test_velocity_values_two_points(self):
+        """Simple sanity check: displacement / dt = velocity."""
+        pos = np.array([[0.0, 0.0, 0.0], [3.0, 4.0, 0.0]])
+        dt = np.array([2.0])
+        vel, _, _ = _compute_derivatives(pos, dt)
+        np.testing.assert_allclose(vel[0], [1.5, 2.0, 0.0])
+
+    def test_non_uniform_dt(self):
+        """Verify derivatives are correctly scaled with non-uniform time steps."""
+        pos = np.array([[0.0, 0.0, 0.0],
+                         [2.0, 0.0, 0.0],
+                         [6.0, 0.0, 0.0]])
+        dt = np.array([2.0, 4.0])          # v[0]=1 m/s, v[1]=1 m/s
+        vel, acc, _ = _compute_derivatives(pos, dt)
+        np.testing.assert_allclose(vel[:, 0], [1.0, 1.0])
+        # Uniform velocity → zero acceleration
+        np.testing.assert_allclose(acc[:, 0], 0.0, atol=1e-10)
+
+
+# ===========================================================================
+# _safe_stats
+# ===========================================================================
+
+
+class TestSafeStats:
+
+    def test_empty_array_all_nan(self):
+        result = _safe_stats(np.array([]), "x")
+        assert set(result.keys()) == {"x_mean", "x_std", "x_min", "x_max", "x_median"}
+        assert all(math.isnan(v) for v in result.values())
+
+    def test_single_value(self):
+        result = _safe_stats(np.array([7.0]), "v")
+        assert result["v_mean"] == pytest.approx(7.0)
+        assert result["v_std"] == pytest.approx(0.0)
+        assert result["v_min"] == pytest.approx(7.0)
+        assert result["v_max"] == pytest.approx(7.0)
+        assert result["v_median"] == pytest.approx(7.0)
+
+    def test_normal_array(self):
+        arr = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        result = _safe_stats(arr, "s")
+        assert result["s_mean"] == pytest.approx(3.0)
+        assert result["s_min"] == pytest.approx(1.0)
+        assert result["s_max"] == pytest.approx(5.0)
+        assert result["s_median"] == pytest.approx(3.0)
+
+    def test_prefix_applied_to_all_keys(self):
+        result = _safe_stats(np.array([1.0]), "pfx")
+        assert all(k.startswith("pfx_") for k in result)
+
+    def test_returns_five_keys(self):
+        result = _safe_stats(np.array([1.0, 2.0]), "z")
+        assert len(result) == 5
+
+
+# ===========================================================================
+# _extract_trajectory_features — key completeness
+# ===========================================================================
+
+
+class TestExtractTrajFeaturesKeyCompleteness:
+    """Every trajectory length must return the full, consistent key set."""
+
+    def test_one_point_trajectory_has_all_keys(self):
+        group = _make_group([1.0], [2.0], [3.0])
+        feats = _extract_trajectory_features(group)
+        missing = ALL_EXPECTED_KEYS - feats.keys()
+        assert not missing, f"Missing keys for 1-point trajectory: {missing}"
+
+    def test_two_point_trajectory_has_all_keys(self):
+        group = _make_group([0.0, 1.0], [0.0, 0.0], [0.0, 0.5])
+        feats = _extract_trajectory_features(group)
+        missing = ALL_EXPECTED_KEYS - feats.keys()
+        assert not missing, f"Missing keys for 2-point trajectory: {missing}"
+
+    def test_three_point_trajectory_has_all_keys(self):
+        group = _make_group([0.0, 1.0, 2.0], [0.0]*3, [0.0, 0.5, 0.4])
+        feats = _extract_trajectory_features(group)
+        missing = ALL_EXPECTED_KEYS - feats.keys()
+        assert not missing, f"Missing keys for 3-point trajectory: {missing}"
+
+    def test_four_point_trajectory_has_all_keys(self):
+        group = _make_group([0.0, 1.0, 2.0, 3.0], [0.0]*4, [0.0, 0.5, 0.8, 0.3])
+        feats = _extract_trajectory_features(group)
+        missing = ALL_EXPECTED_KEYS - feats.keys()
+        assert not missing, f"Missing keys for 4-point trajectory: {missing}"
+
+    def test_long_trajectory_has_all_keys(self):
+        n = 50
+        t = np.linspace(0, 5, n)
+        xs = list(t * 10.0)
+        ys = [0.0] * n
+        zs = list(50.0 * t - 4.905 * t**2)  # parabolic arc
+        group = _make_group(xs, ys, zs, dt_seconds=[0.1] * (n - 1))
+        feats = _extract_trajectory_features(group)
+        missing = ALL_EXPECTED_KEYS - feats.keys()
+        assert not missing, f"Missing keys for {n}-point trajectory: {missing}"
+
+
+# ===========================================================================
+# _extract_trajectory_features — 1-point edge case
+# ===========================================================================
+
+
+class TestSinglePointTrajectory:
+
+    def setup_method(self):
+        self.feats = _extract_trajectory_features(
+            _make_group([5.0], [3.0], [10.0])
+        )
+
+    def test_n_points_is_one(self):
+        assert self.feats["n_points"] == 1.0
+
+    def test_total_duration_is_zero(self):
+        assert self.feats["total_duration_s"] == 0.0
+
+    def test_path_length_is_zero(self):
+        assert self.feats["path_length_3d"] == 0.0
+
+    def test_all_derivative_features_are_nan(self):
+        for key in _DERIVATIVE_KEYS:
+            assert math.isnan(self.feats[key]), f"{key} should be NaN for 1-point trajectory"
+
+    def test_launch_position_correct(self):
+        assert self.feats["launch_x"] == pytest.approx(5.0)
+        assert self.feats["launch_y"] == pytest.approx(3.0)
+        assert self.feats["launch_z"] == pytest.approx(10.0)
+
+    def test_apogee_equals_single_z(self):
+        assert self.feats["apogee_z"] == pytest.approx(10.0)
+
+    def test_apogee_time_frac_is_zero(self):
+        # Only one point → idx=0 → 0 / max(0,1) = 0
+        assert self.feats["apogee_time_frac"] == pytest.approx(0.0)
+
+
+# ===========================================================================
+# _extract_trajectory_features — two-point trajectory
+# ===========================================================================
+
+
+class TestTwoPointTrajectory:
+
+    def setup_method(self):
+        # Simple 1 m/s diagonal motion for 1 second
+        self.group = _make_group([0.0, 1.0], [0.0, 1.0], [0.0, 1.0],
+                                  dt_seconds=[1.0])
+        self.feats = _extract_trajectory_features(self.group)
+
+    def test_velocity_features_are_finite(self):
+        for stat in ["mean", "std", "min", "max", "median"]:
+            assert math.isfinite(self.feats[f"speed_{stat}"])
+
+    def test_acceleration_features_are_nan(self):
+        """2 points → only 1 velocity estimate → acc requires 2 → NaN."""
+        for stat in ["mean", "std", "min", "max", "median"]:
+            assert math.isnan(self.feats[f"acc_mag_{stat}"])
+
+    def test_jerk_features_are_nan(self):
+        for stat in ["mean", "std", "min", "max", "median"]:
+            assert math.isnan(self.feats[f"jerk_mag_{stat}"])
+
+    def test_initial_speed_correct(self):
+        # displacement = sqrt(3), dt = 1 → speed = sqrt(3)
+        assert self.feats["initial_speed"] == pytest.approx(math.sqrt(3), rel=1e-6)
+
+    def test_path_length_correct(self):
+        assert self.feats["path_length_3d"] == pytest.approx(math.sqrt(3), rel=1e-6)
+
+
+# ===========================================================================
+# _extract_trajectory_features — launch angle
+# ===========================================================================
+
+
+class TestLaunchAngle:
+
+    def test_vertical_launch_elevation_is_pi_over_2(self):
+        """Pure vertical launch: vx=0, vy=0, vz>0 → arctan2(vz, 0) = π/2.
+        This would be a division-by-zero with atan(vz/v_horiz) but
+        arctan2 handles it correctly, returning π/2."""
+        group = _make_group(
+            [0.0, 0.0],   # x constant
+            [0.0, 0.0],   # y constant
+            [0.0, 1.0],   # z increases → purely vertical
+            dt_seconds=[1.0],
+        )
+        feats = _extract_trajectory_features(group)
+        assert feats["launch_angle_elev"] == pytest.approx(math.pi / 2, rel=1e-6)
+
+    def test_horizontal_launch_elevation_is_zero(self):
+        """Purely horizontal motion → elevation angle = 0."""
+        group = _make_group(
+            [0.0, 1.0],
+            [0.0, 0.0],
+            [0.0, 0.0],   # z constant
+            dt_seconds=[1.0],
+        )
+        feats = _extract_trajectory_features(group)
+        assert feats["launch_angle_elev"] == pytest.approx(0.0, abs=1e-10)
+
+    def test_45_degree_elevation_angle(self):
+        """Equal vertical and horizontal velocity → 45° elevation."""
+        group = _make_group(
+            [0.0, 1.0],   # vx = 1 m/s
+            [0.0, 0.0],
+            [0.0, 1.0],   # vz = 1 m/s
+            dt_seconds=[1.0],
+        )
+        feats = _extract_trajectory_features(group)
+        assert feats["launch_angle_elev"] == pytest.approx(math.pi / 4, rel=1e-6)
+
+    def test_azimuth_due_north(self):
+        """Motion in +y only → azimuth = π/2 (north in atan2 convention)."""
+        group = _make_group(
+            [0.0, 0.0],
+            [0.0, 1.0],   # vy > 0, vx = 0
+            [0.0, 0.0],
+            dt_seconds=[1.0],
+        )
+        feats = _extract_trajectory_features(group)
+        assert feats["launch_angle_azimuth"] == pytest.approx(math.pi / 2, rel=1e-6)
+
+    def test_zero_speed_elevation_is_nan(self):
+        """If the rocket does not move (speed=0), elevation angle should be NaN."""
+        group = _make_group(
+            [1.0, 1.0],   # no displacement
+            [1.0, 1.0],
+            [1.0, 1.0],
+            dt_seconds=[1.0],
+        )
+        feats = _extract_trajectory_features(group)
+        assert math.isnan(feats["launch_angle_elev"])
+
+
+# ===========================================================================
+# _extract_trajectory_features — apogee
+# ===========================================================================
+
+
+class TestApogee:
+
+    def test_apogee_is_maximum_z(self):
+        zs = [0.0, 10.0, 20.0, 15.0, 5.0]
+        group = _make_group(list(range(5)), [0.0]*5, zs)
+        feats = _extract_trajectory_features(group)
+        assert feats["apogee_z"] == pytest.approx(20.0)
+
+    def test_apogee_relative_is_rise_from_launch(self):
+        zs = [5.0, 15.0, 25.0, 10.0]
+        group = _make_group(list(range(4)), [0.0]*4, zs)
+        feats = _extract_trajectory_features(group)
+        assert feats["apogee_relative"] == pytest.approx(20.0)  # 25 - 5
+
+    def test_apogee_time_frac_midpoint(self):
+        """Peak at index 2 of 5 points (0-indexed) → frac = 2/4 = 0.5."""
+        zs = [0.0, 5.0, 10.0, 5.0, 0.0]
+        group = _make_group(list(range(5)), [0.0]*5, zs)
+        feats = _extract_trajectory_features(group)
+        assert feats["apogee_time_frac"] == pytest.approx(0.5)
+
+    def test_time_to_apogee_absolute(self):
+        """5 points, 0.1 s intervals, peak at index 2 → time = 0.2 s."""
+        zs = [0.0, 5.0, 10.0, 5.0, 0.0]
+        group = _make_group(list(range(5)), [0.0]*5, zs,
+                             dt_seconds=[0.1, 0.1, 0.1, 0.1])
+        feats = _extract_trajectory_features(group)
+        assert feats["time_to_apogee_s"] == pytest.approx(0.2, rel=1e-6)
+
+    def test_monotone_descent_apogee_at_start(self):
+        """If rocket only descends, apogee is the first point."""
+        zs = [100.0, 80.0, 50.0, 10.0]
+        group = _make_group(list(range(4)), [0.0]*4, zs)
+        feats = _extract_trajectory_features(group)
+        assert feats["apogee_z"] == pytest.approx(100.0)
+        assert feats["apogee_time_frac"] == pytest.approx(0.0)
+
+
+# ===========================================================================
+# _extract_trajectory_features — duplicate timestamps (dt=0 guard)
+# ===========================================================================
+
+
+class TestDuplicateTimestamps:
+
+    def test_all_finite_no_inf_on_duplicate_timestamps(self):
+        """Two consecutive identical timestamps → dt=0 → must NOT produce inf
+        in any feature. The implementation replaces dt<=0 with NaN then fills
+        with median before calling _compute_derivatives."""
+        group = _make_group(
+            [0.0, 1.0, 2.0, 3.0, 4.0],
+            [0.0] * 5,
+            [0.0, 1.0, 2.0, 1.5, 0.5],
+            # Second interval is 0 (duplicate timestamp)
+            dt_seconds=[0.1, 0.0, 0.1, 0.1],
+        )
+        feats = _extract_trajectory_features(group)
+        inf_keys = [k for k, v in feats.items() if isinstance(v, float) and math.isinf(v)]
+        assert not inf_keys, f"Infinite values found in features: {inf_keys}"
+
+    def test_all_duplicate_timestamps_produces_nan_not_error(self):
+        """All points at the same time → all dt=0 → valid_dt is empty →
+        falls into the 'not enough points' branch → derivative features are NaN."""
+        group = _make_group(
+            [0.0, 1.0, 2.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 2.0],
+            dt_seconds=[0.0, 0.0],
+        )
+        feats = _extract_trajectory_features(group)
+        for key in _DERIVATIVE_KEYS:
+            assert math.isnan(feats[key]), f"{key} should be NaN when all dt=0"
+
+
+# ===========================================================================
+# _extract_trajectory_features — spatial features
+# ===========================================================================
+
+
+class TestSpatialFeatures:
+
+    def test_x_range(self):
+        group = _make_group([1.0, 4.0, 2.0], [0.0]*3, [0.0]*3)
+        feats = _extract_trajectory_features(group)
+        assert feats["x_range"] == pytest.approx(3.0)
+
+    def test_z_range(self):
+        group = _make_group([0.0]*4, [0.0]*4, [0.0, 5.0, 10.0, 3.0])
+        feats = _extract_trajectory_features(group)
+        assert feats["z_range"] == pytest.approx(10.0)
+
+    def test_max_horiz_range(self):
+        """Max horizontal displacement from the launch point."""
+        group = _make_group([0.0, 3.0, 4.0], [0.0, 4.0, 0.0], [0.0]*3)
+        feats = _extract_trajectory_features(group)
+        # Point 1: sqrt(9+16)=5, Point 2: sqrt(16+0)=4 → max=5
+        assert feats["max_horiz_range"] == pytest.approx(5.0, rel=1e-6)
+
+    def test_final_horiz_range(self):
+        group = _make_group([0.0, 3.0], [0.0, 4.0], [0.0, 0.0], dt_seconds=[1.0])
+        feats = _extract_trajectory_features(group)
+        assert feats["final_horiz_range"] == pytest.approx(5.0, rel=1e-6)
+
+    def test_delta_z_total(self):
+        group = _make_group([0.0]*3, [0.0]*3, [2.0, 7.0, 5.0])
+        feats = _extract_trajectory_features(group)
+        assert feats["delta_z_total"] == pytest.approx(3.0)  # 5 - 2
+
+
+# ===========================================================================
+# build_features
+# ===========================================================================
+
+
+class TestBuildFeatures:
+
+    def _make_raw_df(self, include_label: bool = True) -> pd.DataFrame:
+        rows = []
+        # Trajectory 1: 5 points, label 0
+        for i in range(5):
+            row = {
+                "traj_ind": 1,
+                "time_stamp": f"2024-01-01 00:00:0{i}.000000",
+                "x": float(i),
+                "y": 0.0,
+                "z": float(i) * 0.5,
+            }
+            if include_label:
+                row["label"] = 0
+            rows.append(row)
+        # Trajectory 2: 4 points, label 2
+        for i in range(4):
+            row = {
+                "traj_ind": 2,
+                "time_stamp": f"2024-01-02 00:00:0{i}.000000",
+                "x": float(i) * 2,
+                "y": 1.0,
+                "z": float(i),
+            }
+            if include_label:
+                row["label"] = 2
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def test_output_has_one_row_per_trajectory(self):
+        df = self._make_raw_df()
+        result = build_features(df)
+        assert len(result) == 2
+
+    def test_index_is_traj_ind(self):
+        df = self._make_raw_df()
+        result = build_features(df)
+        assert set(result.index) == {1, 2}
+
+    def test_label_column_present_when_provided(self):
+        df = self._make_raw_df(include_label=True)
+        result = build_features(df)
+        assert "label" in result.columns
+        assert result.loc[1, "label"] == 0
+        assert result.loc[2, "label"] == 2
+
+    def test_label_column_absent_when_not_provided(self):
+        df = self._make_raw_df(include_label=False)
+        result = build_features(df)
+        assert "label" not in result.columns
+
+    def test_feature_count_matches_expected(self):
+        """76 features + label = 77 columns for labeled data."""
+        df = self._make_raw_df(include_label=True)
+        result = build_features(df)
+        assert result.shape[1] == 77
+
+    def test_unsorted_input_sorted_correctly(self):
+        """Points provided in reverse time order must produce the same result
+        as if provided in forward order."""
+        df_fwd = self._make_raw_df(include_label=False)
+        df_rev = df_fwd.iloc[::-1].reset_index(drop=True)  # reverse row order
+
+        result_fwd = build_features(df_fwd)
+        result_rev = build_features(df_rev)
+
+        pd.testing.assert_frame_equal(
+            result_fwd.sort_index(),
+            result_rev.sort_index(),
+            check_like=True,
+        )
+
+    def test_mixed_timestamp_formats(self):
+        """Timestamps with and without microseconds must parse without error."""
+        df = pd.DataFrame([
+            {"traj_ind": 99, "time_stamp": "2024-01-01 00:00:00",
+             "x": 0.0, "y": 0.0, "z": 0.0, "label": 1},
+            {"traj_ind": 99, "time_stamp": "2024-01-01 00:00:00.050000",
+             "x": 1.0, "y": 0.0, "z": 0.5, "label": 1},
+        ])
+        result = build_features(df)
+        assert len(result) == 1
+        assert not result["speed_mean"].isna().any()
