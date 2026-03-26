@@ -124,6 +124,28 @@ This penalizes models that perform well on average but fail on any single class.
 
 ---
 
+## Model Interpretability
+
+![SHAP Feature Importance](shap_summary.png)
+
+The project includes a full interpretability pipeline (`src/interpret.py`) powered by **SHAP (SHapley Additive exPlanations)**. After training, `TreeExplainer` computes exact Shapley values for a representative sample of test trajectories and produces the stacked bar chart above, broken down by per-class contribution.
+
+**Key findings from SHAP analysis:**
+
+- **Launch position (`launch_x`, `launch_z`)** and **horizontal speed (`v_horiz_median`)** are the dominant features — launcher geography and muzzle velocity are the strongest class discriminators, consistent with the business context (different rebel groups with independent rocket supplies).
+- **Kinematic derivative features** (`acc_horiz_min`, `vz_mean`, `speed_median`) rank in the top 10, confirming that propulsion physics — not just trajectory shape — are what separates rocket classes.
+- **Apogee-related features** (`apogee_relative`, `apogee_time_frac`) appear mid-table, consistent with ballistic arc differences between rocket families.
+
+To regenerate the SHAP analysis:
+
+```bash
+poetry run python src/interpret.py
+```
+
+This produces `shap_summary.png` and `interpretation_report.txt` in the project root.
+
+---
+
 ## Key Architectural Decisions
 
 ### 1. Vectorized Physics Feature Engineering (`src/features.py`)
