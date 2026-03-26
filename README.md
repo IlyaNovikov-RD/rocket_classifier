@@ -1,5 +1,7 @@
 # Rocket Trajectory Classifier
 
+![Physics-Informed Feature Visualization](demo.png)
+
 A production-grade machine learning pipeline that classifies rocket types from radar-tracked 3D trajectory data. Given a sequence of positional readings `(x, y, z, time_stamp)` for a single trajectory, the model predicts the rocket class (0, 1, or 2) as early as possible — enabling threat assessment and response prioritization.
 
 ---
