@@ -13,11 +13,9 @@ Model loading strategy (in priority order):
        by ``@st.cache_resource`` so it only happens once per session.
 
 Run with:
-    streamlit run src/app.py
+    streamlit run rocket_classifier/app.py
 """
 
-import pickle
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -25,14 +23,19 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+from xgboost import XGBClassifier
 
-sys.path.insert(0, str(Path(__file__).parent))
-from features import _extract_trajectory_features
+from rocket_classifier.features import _extract_trajectory_features
 
 MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
+MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
 MODEL_RELEASE_URL = (
     "https://github.com/IlyaNovikov-RD/rocket_classifier"
     "/releases/download/v1.0.0/model.pkl"
+)
+MEDIANS_RELEASE_URL = (
+    "https://github.com/IlyaNovikov-RD/rocket_classifier"
+    "/releases/download/v1.0.0/train_medians.npy"
 )
 
 # ── Display constants ──────────────────────────────────────────────────────────
@@ -50,23 +53,10 @@ BLUE = "#58a6ff"
 
 
 @st.cache_resource
-def _download_model() -> bytes | None:
-    """Download the model binary from the GitHub Release asset.
-
-    Streams ``MODEL_RELEASE_URL`` in 8 KB chunks so that large binaries do
-    not require buffering the full file in memory before writing.  HTTP
-    errors and network failures are caught and surfaced as Streamlit
-    warnings rather than crashing the app.
-
-    This function is decorated with ``@st.cache_resource`` so the download
-    runs at most once per Streamlit server process, regardless of how many
-    browser sessions are open.
-
-    Returns:
-        The raw model bytes on success, or ``None`` if the download failed.
-    """
+def _download_file(url: str) -> bytes | None:
+    """Download a binary file from a URL, returning raw bytes or None on failure."""
     try:
-        response = requests.get(MODEL_RELEASE_URL, stream=True, timeout=60)
+        response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()
         chunks = []
         for chunk in response.iter_content(chunk_size=8192):
@@ -74,34 +64,57 @@ def _download_model() -> bytes | None:
                 chunks.append(chunk)
         return b"".join(chunks)
     except requests.RequestException as exc:
-        st.warning(f"Could not download model from GitHub Release: {exc}")
+        st.warning(f"Could not download from {url}: {exc}")
         return None
 
 
 @st.cache_resource
 def load_model():
-    """Load the trained XGBoost classifier, downloading it if needed.
+    """Load the trained XGBoost classifier using native XGBoost format.
 
     Resolution order:
-        1. Local ``model.pkl`` in the project root — used when the full
-           training pipeline has been run locally (``python src/main.py``).
-        2. Remote download from the GitHub Release asset at
-           ``MODEL_RELEASE_URL`` — automatic fallback for fresh clones or
-           cloud deployments where no local file exists.
+        1. Local ``model.pkl`` in the project root.
+        2. Remote download from GitHub Release.
 
     Returns:
-        The unpickled XGBClassifier, or ``None`` if neither source is
-        available.
+        The XGBClassifier, or ``None`` if neither source is available.
     """
     if MODEL_PATH.exists():
-        with MODEL_PATH.open("rb") as f:
-            return pickle.load(f)
+        model = XGBClassifier()
+        model.load_model(str(MODEL_PATH))
+        return model
 
-    # Fallback: fetch from GitHub Release
-    model_bytes = _download_model()
+    # Fallback: fetch from GitHub Release and write to temp file for native load
+    model_bytes = _download_file(MODEL_RELEASE_URL)
     if model_bytes is None:
         return None
-    return pickle.loads(model_bytes)
+    # Write to a temp path so XGBoost's native loader can read it
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        f.write(model_bytes)
+        tmp_path = f.name
+    model = XGBClassifier()
+    model.load_model(tmp_path)
+    return model
+
+
+@st.cache_resource
+def load_train_medians() -> np.ndarray | None:
+    """Load per-feature training medians for consistent NaN imputation.
+
+    Returns:
+        NumPy array of per-column medians, or ``None`` if unavailable.
+    """
+    if MEDIANS_PATH.exists():
+        return np.load(MEDIANS_PATH)
+
+    medians_bytes = _download_file(MEDIANS_RELEASE_URL)
+    if medians_bytes is None:
+        return None
+    import io
+
+    return np.load(io.BytesIO(medians_bytes))
 
 
 @st.cache_data
@@ -190,6 +203,7 @@ def classify(
     pos: np.ndarray,
     t: np.ndarray,
     feature_names: list[str],
+    train_medians: np.ndarray | None = None,
 ) -> tuple[int, np.ndarray]:
     """Extract production features from a trajectory and classify it.
 
@@ -201,6 +215,8 @@ def classify(
         pos: Position array of shape (n, 3).
         t: Time array of shape (n,) in seconds.
         feature_names: Ordered list of 76 feature names matching training order.
+        train_medians: Per-feature median array from training. Used to fill
+            NaN values consistently with training. Falls back to 0.0 if None.
 
     Returns:
         A tuple of:
@@ -211,7 +227,14 @@ def classify(
     df = pd.DataFrame({"x": pos[:, 0], "y": pos[:, 1], "z": pos[:, 2], "time_stamp": times})
     feats = _extract_trajectory_features(df)
     vec = np.array([feats.get(k, 0.0) for k in feature_names], dtype=np.float32)
-    vec = np.nan_to_num(vec, nan=0.0)
+
+    # Fill NaN with train medians to match training imputation (prevent train-serve skew)
+    nan_mask = np.isnan(vec)
+    if nan_mask.any() and train_medians is not None:
+        vec[nan_mask] = train_medians[nan_mask]
+    else:
+        vec = np.nan_to_num(vec, nan=0.0)
+
     X = vec.reshape(1, -1)
 
     class_idx = int(model.predict(X)[0])
@@ -376,6 +399,7 @@ def main() -> None:
     )
 
     model = load_model()
+    train_medians = load_train_medians()
     feature_names = get_feature_names()
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
@@ -424,7 +448,7 @@ def main() -> None:
             st.error(
                 "**model.pkl not found.**\n\n"
                 "Train the model first:\n"
-                "```\npoetry run python src/main.py\n```"
+                "```\nuv run python src/main.py\n```"
             )
         else:
             st.success("✓ Model loaded")
@@ -434,7 +458,7 @@ def main() -> None:
     pos, t = generate_trajectory(initial_speed, thrust_accel, noise_sigma)
 
     if model is not None:
-        class_idx, proba = classify(model, pos, t, feature_names)
+        class_idx, proba = classify(model, pos, t, feature_names, train_medians)
         confidence = float(proba[class_idx])
     else:
         class_idx = 0

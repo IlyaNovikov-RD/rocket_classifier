@@ -16,6 +16,7 @@ Typical usage::
 
 import logging
 from datetime import datetime
+from typing import Self
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -91,7 +92,7 @@ class TrajectoryPoint(BaseModel):
         return label
 
     @model_validator(mode="after")
-    def z_consistent_with_altitude(self) -> "TrajectoryPoint":
+    def z_consistent_with_altitude(self) -> Self:
         """Warn when altitude appears implausibly large (> 100 km).
 
         Shtuchia's threat envelope does not extend to orbital altitudes.

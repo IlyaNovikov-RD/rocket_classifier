@@ -10,17 +10,12 @@ Coverage targets:
 """
 
 import math
-import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-# Allow importing from src/ without installing the package
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from features import (
+from rocket_classifier.features import (
     _compute_derivatives,
     _extract_trajectory_features,
     _safe_stats,
@@ -449,6 +444,18 @@ class TestLaunchAngle:
         )
         feats = _extract_trajectory_features(group)
         assert math.isnan(feats["launch_angle_elev"])
+
+    def test_zero_speed_azimuth_is_nan(self):
+        """If the rocket does not move (speed=0), azimuth should also be NaN,
+        not arctan2(0,0)=0 which is a meaningless value."""
+        group = _make_group(
+            [1.0, 1.0],  # no displacement
+            [1.0, 1.0],
+            [1.0, 1.0],
+            dt_seconds=[1.0],
+        )
+        feats = _extract_trajectory_features(group)
+        assert math.isnan(feats["launch_angle_azimuth"])
 
 
 # ===========================================================================

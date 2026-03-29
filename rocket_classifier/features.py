@@ -161,7 +161,10 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
         )
 
         # Azimuth of initial velocity (heading in horizontal plane)
-        feats["launch_angle_azimuth"] = float(np.arctan2(vy[0], vx[0]))
+        # When speed is zero, azimuth is undefined — arctan2(0,0)=0 is meaningless
+        feats["launch_angle_azimuth"] = (
+            float(np.arctan2(vy[0], vx[0])) if speed[0] > 0 else np.nan
+        )
 
         # Initial speed components
         feats["initial_speed"] = float(speed[0])
@@ -256,9 +259,12 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
 
     # Time to apogee (fraction of total trajectory)
     feats["apogee_time_frac"] = float(apogee_idx / max(n_points - 1, 1))
-    # Absolute time to apogee
-    if len(dt_sec) > 0 and apogee_idx > 0:
-        feats["time_to_apogee_s"] = float(np.nansum(dt_sec[:apogee_idx]))
+    # Absolute time to apogee — use direct timestamp subtraction to avoid
+    # nansum gaps from duplicate-timestamp NaNs understating the true elapsed time
+    if apogee_idx > 0:
+        feats["time_to_apogee_s"] = float(
+            (times[apogee_idx] - times[0]).astype(np.float64) / 1e9
+        )
     else:
         feats["time_to_apogee_s"] = 0.0
 
