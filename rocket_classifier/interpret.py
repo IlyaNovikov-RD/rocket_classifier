@@ -15,7 +15,6 @@ Why TreeExplainer?
 """
 
 import logging
-import sys
 import textwrap
 import time
 from pathlib import Path
@@ -28,9 +27,8 @@ import numpy as np
 import pandas as pd
 import shap
 
-sys.path.insert(0, str(Path(__file__).parent))
-from features import build_features
-from model import train_with_cv
+from rocket_classifier.features import build_features
+from rocket_classifier.model import train_with_cv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -125,14 +123,17 @@ def load_features() -> tuple[pd.DataFrame, pd.DataFrame]:
 def train_model(train_feats: pd.DataFrame):
     """Train XGBoost on the full training set and return the fitted model."""
     feature_cols = [c for c in train_feats.columns if c != "label"]
-    X_train = train_feats[feature_cols].fillna(train_feats[feature_cols].median())
+    X_train = train_feats[feature_cols]
     y_train = train_feats["label"].to_numpy(dtype=int)
     groups = np.array(train_feats.index.tolist())
 
     logger.info("Training XGBoost model for SHAP analysis (5-fold CV + full retrain)...")
-    model, fold_scores = train_with_cv(X_train, y_train, groups, n_splits=5)
+    model, fold_scores, train_medians = train_with_cv(X_train, y_train, groups, n_splits=5)
     logger.info("CV min-recall: %.4f ± %.4f", np.mean(fold_scores), np.std(fold_scores))
-    return model, feature_cols, X_train
+
+    # Impute NaN for SHAP computation (using the same medians as inference)
+    X_train_filled = X_train.fillna(pd.Series(train_medians, index=feature_cols))
+    return model, feature_cols, X_train_filled
 
 
 SHAP_SAMPLE_SIZE = 500  # trajectories to explain — sufficient for stable importance ranks
@@ -347,12 +348,10 @@ def main() -> None:
 
     train_feats, test_feats = load_features()
 
-    feature_cols = [c for c in train_feats.columns if c != "label"]
-    train_medians = train_feats[feature_cols].median()
-
     model, feature_cols, X_train = train_model(train_feats)
 
-    X_test = test_feats.reindex(columns=feature_cols).fillna(train_medians)
+    # Impute test NaN using train medians (consistent with training pipeline)
+    X_test = test_feats.reindex(columns=feature_cols).fillna(X_train.median())
 
     shap_values, mean_abs_shap = compute_shap(model, X_train, X_test)
 

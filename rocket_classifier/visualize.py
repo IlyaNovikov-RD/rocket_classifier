@@ -13,7 +13,6 @@ visualization reflects the same physics code path used in production.
 """
 
 import logging
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -24,8 +23,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent))
-from features import _compute_derivatives
+from rocket_classifier.features import _compute_derivatives
 
 logger = logging.getLogger(__name__)
 

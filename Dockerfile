@@ -1,26 +1,23 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-# Prevent Python from writing .pyc files and enable unbuffered stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    POETRY_VERSION=2.3.2 \
-    POETRY_HOME="/opt/poetry" \
-    POETRY_VIRTUALENVS_IN_PROJECT=true \
-    POETRY_NO_INTERACTION=1
+    PYTHONUNBUFFERED=1
 
-# Install Poetry
-RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
+# Install uv — single static binary, no pip overhead
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Copy dependency files first for layer caching
-COPY pyproject.toml poetry.lock ./
-
-# Install dependencies (no root package, skip dev deps)
-RUN poetry install --no-root
+# Copy dependency manifest first for layer caching.
+# uv sync --frozen uses the lockfile directly — no resolver run in CI/CD.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy project source and data
-COPY src/ ./src/
+COPY rocket_classifier/ ./rocket_classifier/
 COPY data/ ./data/
 
-CMD ["poetry", "run", "python", "src/main.py"]
+# Install the project itself (now that source is available)
+RUN uv sync --frozen --no-dev
+
+CMD ["uv", "run", "python", "-m", "rocket_classifier.main"]

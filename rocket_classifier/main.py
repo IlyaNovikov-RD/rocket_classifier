@@ -1,4 +1,4 @@
-"""Pipeline orchestrator: Load -> Features -> Train -> Predict -> Export.
+"""Pipeline orchestrator: Load -> Validate -> Features -> Train -> Predict -> Export.
 
 Produces ``submission.csv`` in the project root matching the format of
 ``data/sample_submission.csv``:
@@ -7,25 +7,22 @@ Produces ``submission.csv`` in the project root matching the format of
 """
 
 import logging
-import pickle
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-# Allow running from repo root or src/
-sys.path.insert(0, str(Path(__file__).parent))
-
-from features import build_features
-from model import predict, train_with_cv
+from rocket_classifier.features import build_features
+from rocket_classifier.model import predict, train_with_cv
+from rocket_classifier.schema import validate_dataframe
 
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 OUTPUT_PATH = Path(__file__).parent.parent / "submission.csv"
 MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
+MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
 FEATURE_CACHE_TRAIN = Path(__file__).parent.parent / "cache_train_features.parquet"
 FEATURE_CACHE_TEST = Path(__file__).parent.parent / "cache_test_features.parquet"
 
@@ -83,23 +80,33 @@ def get_features(df: pd.DataFrame, cache_path: Path, name: str) -> pd.DataFrame:
 def main() -> None:
     """Run the full classification pipeline end-to-end.
 
-    Executes five sequential stages:
+    Executes six sequential stages:
         1. Load raw CSV data.
-        2. Engineer per-trajectory features (with Parquet caching).
-        3. Train XGBoost with 5-fold GroupKFold cross-validation.
-        4. Generate predictions for the test set.
-        5. Export ``submission.csv`` matching the sample submission format.
+        2. Validate training data against the Pydantic schema.
+        3. Engineer per-trajectory features (with Parquet caching).
+        4. Train XGBoost with 5-fold GroupKFold cross-validation.
+        5. Generate predictions for the test set.
+        6. Export ``submission.csv`` matching the sample submission format.
     """
     t_start = time.time()
 
     # --- Step 1: Load ---
     train_raw, test_raw, sample_sub = load_data()
 
-    # --- Step 2: Feature Engineering ---
+    # --- Step 2: Schema validation ---
+    _valid, errors = validate_dataframe(train_raw, has_label=True)
+    if errors:
+        logger.warning(
+            "Schema validation: %d/%d rows have issues (pipeline continues with raw data)",
+            len(errors),
+            len(train_raw),
+        )
+
+    # --- Step 3: Feature Engineering ---
     train_feats = get_features(train_raw, FEATURE_CACHE_TRAIN, "train")
     test_feats = get_features(test_raw, FEATURE_CACHE_TEST, "test")
 
-    # Align feature columns (train may have 'label', test doesn't)
+    # Align feature columns (train has 'label', test doesn't)
     feature_cols = [c for c in train_feats.columns if c != "label"]
     X_train = train_feats[feature_cols]
     y_train = train_feats["label"].to_numpy(dtype=int)
@@ -112,27 +119,24 @@ def main() -> None:
         (y_train == 2).sum(),
     )
 
-    # Align test columns to train (fill any missing with NaN)
+    # Align test columns to train (fill any structurally missing with NaN)
     X_test = test_feats.reindex(columns=feature_cols)
-
-    # Fill remaining NaNs with column medians from train
-    train_medians = X_train.median()
-    X_train = X_train.fillna(train_medians)
-    X_test = X_test.fillna(train_medians)
 
     logger.info("Feature matrix — train: %s, test: %s", X_train.shape, X_test.shape)
 
-    # --- Step 3: Train with CV ---
-    model, fold_scores = train_with_cv(X_train, y_train, groups, n_splits=5)
+    # --- Step 4: Train with CV ---
+    # NaN imputation now happens inside train_with_cv per-fold (no leakage)
+    model, fold_scores, train_medians = train_with_cv(X_train, y_train, groups, n_splits=5)
     logger.info("Final CV min-recall scores: %s", [f"{s:.4f}" for s in fold_scores])
 
-    # Persist the trained model for the Streamlit demo (src/app.py)
-    with MODEL_PATH.open("wb") as f:
-        pickle.dump(model, f)
+    # Persist the trained model and imputation medians
+    model.save_model(str(MODEL_PATH))
+    np.save(MEDIANS_PATH, train_medians)
     logger.info("Model saved to: %s", MODEL_PATH)
+    logger.info("Train medians saved to: %s", MEDIANS_PATH)
 
-    # --- Step 4: Predict ---
-    y_pred = predict(model, X_test)
+    # --- Step 5: Predict ---
+    y_pred = predict(model, X_test, train_medians)
     logger.info(
         "Test predictions — 0: %d, 1: %d, 2: %d",
         (y_pred == 0).sum(),
@@ -140,7 +144,7 @@ def main() -> None:
         (y_pred == 2).sum(),
     )
 
-    # --- Step 5: Export submission ---
+    # --- Step 6: Export submission ---
     # sample_submission.csv columns: label, trajectory_ind
     submission = pd.DataFrame(
         {
