@@ -16,6 +16,8 @@ Run with:
     streamlit run rocket_classifier/app.py
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import numpy as np
@@ -74,7 +76,7 @@ def _download_file(url: str) -> bytes | None:
 
 
 @st.cache_resource
-def load_model():
+def load_model() -> XGBClassifier | None:
     """Load the trained XGBoost classifier using native XGBoost format.
 
     Resolution order:
@@ -222,7 +224,7 @@ def generate_trajectory(
 
 
 def classify(
-    model,
+    model: XGBClassifier,
     pos: np.ndarray,
     t: np.ndarray,
     feature_names: list[str],
@@ -363,7 +365,7 @@ def make_3d_figure(pos: np.ndarray, class_idx: int, confidence: float) -> go.Fig
 # ── UI helpers ─────────────────────────────────────────────────────────────────
 
 
-def _metric_card(col, label: str, value: str, color: str) -> None:
+def _metric_card(col: st.delta_generator.DeltaGenerator, label: str, value: str, color: str) -> None:
     col.markdown(
         f"""
         <div style="background:{PANEL_BG};padding:18px 20px;border-radius:8px;

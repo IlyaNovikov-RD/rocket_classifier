@@ -15,15 +15,19 @@
 
 ## What This Is
 
-An XGBoost classifier that identifies rocket types from radar-tracked 3D flight data. Given a sequence of `(x, y, z, time_stamp)` readings for a single trajectory, the model predicts the rocket class (0, 1, or 2).
+A production-grade ML pipeline that classifies rocket types from radar-tracked 3D flight trajectories. Given a variable-length sequence of `(x, y, z, time_stamp)` radar observations, the system extracts 76 physics-derived features and predicts the rocket class (0, 1, or 2).
 
-**The statistical challenge:** class 2 comprises only ~7% of the training set. The evaluation metric is **minimum per-class recall** — the model is scored by its *worst* class, not its average. A classifier that perfectly identifies classes 0 and 1 but misses every class 2 rocket scores **0.0**.
+### The Core Challenge: Worst-Class Recall Under Severe Imbalance
+
+Standard accuracy is the wrong metric here. Class 2 comprises only **7.1% of training data** (2,339 of 32,741 trajectories), yet the evaluation metric is **minimum per-class recall** — the system is scored by whichever class it handles *worst*. A model that perfectly identifies classes 0 and 1 but misses every class 2 rocket scores **0.0**.
 
 ```math
 \text{score} = \min_{j \in \{0,1,2\}} \frac{\sum_i \mathbf{1}[y_i = j \;\wedge\; \hat{y}_i = j]}{\sum_i \mathbf{1}[y_i = j]}
 ```
 
-**Result:** 5-fold GroupKFold cross-validation min-recall of **0.9984 ± 0.0007** (with OOB threshold tuning) — fewer than 1 in 400 rockets misclassified in the worst class.
+This metric demands that every design decision — feature engineering, class weighting, objective function, and post-hoc threshold tuning — be oriented toward equalising recall across all classes, deliberately sacrificing majority-class precision where necessary to protect minority-class recall.
+
+**Result:** 5-fold GroupKFold cross-validation min-recall of **0.9984 ± 0.0007** — fewer than 1 in 400 rockets misclassified in the worst-performing class.
 
 | Fold | Min-Recall (tuned) |
 |------|--------------------|
