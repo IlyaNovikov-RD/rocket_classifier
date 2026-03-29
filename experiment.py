@@ -10,11 +10,10 @@ import logging
 import time
 
 import numpy as np
-import pandas as pd
 from sklearn.model_selection import GroupKFold
 from xgboost import XGBClassifier
 
-from rocket_classifier.main import load_data, get_features, FEATURE_CACHE_TRAIN
+from rocket_classifier.main import FEATURE_CACHE_TRAIN, get_features, load_data
 from rocket_classifier.model import (
     DEFAULT_XGB_PARAMS,
     _compute_sample_weights,
@@ -51,12 +50,14 @@ def optimize_biases(y_true, proba):
         for b2 in np.linspace(-4, 4, 100):
             b = np.array([0.0, b1, b2])
             s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
-            if s > best_s: best_s, best_b = s, b.copy()
+            if s > best_s:
+                best_s, best_b = s, b.copy()
     for b1 in np.linspace(best_b[1]-0.1, best_b[1]+0.1, 60):
         for b2 in np.linspace(best_b[2]-0.1, best_b[2]+0.1, 60):
             b = np.array([0.0, b1, b2])
             s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
-            if s > best_s: best_s, best_b = s, b.copy()
+            if s > best_s:
+                best_s, best_b = s, b.copy()
     return best_b, best_s
 
 
@@ -64,7 +65,6 @@ def two_stage_predict(X_tr, y_tr, X_val, y_val):
     """Two-stage classifier: {0,1} vs {2}, then 0 vs 1."""
     # Stage 1: is it class 2?
     y1_tr = (y_tr == 2).astype(int)
-    y1_val = (y_val == 2).astype(int)
     sw1 = _compute_sample_weights(y1_tr)
     m1 = XGBClassifier(**STAGE1_PARAMS)
     m1.fit(X_tr, y1_tr, sample_weight=sw1, verbose=False)
@@ -111,7 +111,8 @@ def main():
         X_tr, X_val = X[tr_idx].copy(), X[val_idx].copy()
         y_tr, y_val = y[tr_idx], y[val_idx]
         med = np.nanmedian(X_tr, axis=0)
-        _impute_nan(X_tr, med); _impute_nan(X_val, med)
+        _impute_nan(X_tr, med)
+        _impute_nan(X_val, med)
         sw = _compute_sample_weights(y_tr)
 
         # A: Baseline (softmax)
