@@ -23,6 +23,7 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 OUTPUT_PATH = Path(__file__).parent.parent / "submission.csv"
 MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
 MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
+BIASES_PATH = Path(__file__).parent.parent / "threshold_biases.npy"
 FEATURE_CACHE_TRAIN = Path(__file__).parent.parent / "cache_train_features.parquet"
 FEATURE_CACHE_TEST = Path(__file__).parent.parent / "cache_test_features.parquet"
 
@@ -126,17 +127,19 @@ def main() -> None:
 
     # --- Step 4: Train with CV ---
     # NaN imputation now happens inside train_with_cv per-fold (no leakage)
-    model, fold_scores, train_medians = train_with_cv(X_train, y_train, groups, n_splits=5)
+    model, fold_scores, train_medians, biases = train_with_cv(X_train, y_train, groups, n_splits=5)
     logger.info("Final CV min-recall scores: %s", [f"{s:.4f}" for s in fold_scores])
 
-    # Persist the trained model and imputation medians
+    # Persist the trained model, imputation medians, and threshold biases
     model.save_model(str(MODEL_PATH))
     np.save(MEDIANS_PATH, train_medians)
+    np.save(BIASES_PATH, biases)
     logger.info("Model saved to: %s", MODEL_PATH)
     logger.info("Train medians saved to: %s", MEDIANS_PATH)
+    logger.info("Threshold biases saved to: %s", BIASES_PATH)
 
     # --- Step 5: Predict ---
-    y_pred = predict(model, X_test, train_medians)
+    y_pred = predict(model, X_test, train_medians, biases)
     logger.info(
         "Test predictions — 0: %d, 1: %d, 2: %d",
         (y_pred == 0).sum(),
