@@ -14,10 +14,13 @@ Why TreeExplainer?
   KernelExplainer and producing exact, not approximate, Shapley values.
 """
 
+from __future__ import annotations
+
 import logging
 import textwrap
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib
 
@@ -29,6 +32,9 @@ import shap
 
 from rocket_classifier.features import build_features
 from rocket_classifier.model import train_with_cv
+
+if TYPE_CHECKING:
+    from xgboost import XGBClassifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -120,7 +126,9 @@ def load_features() -> tuple[pd.DataFrame, pd.DataFrame]:
     return train_feats, test_feats
 
 
-def train_model(train_feats: pd.DataFrame):
+def train_model(
+    train_feats: pd.DataFrame,
+) -> tuple[XGBClassifier, list[str], pd.DataFrame]:
     """Train XGBoost on the full training set and return the fitted model."""
     feature_cols = [c for c in train_feats.columns if c != "label"]
     X_train = train_feats[feature_cols]
@@ -139,7 +147,9 @@ def train_model(train_feats: pd.DataFrame):
 SHAP_SAMPLE_SIZE = 500  # trajectories to explain — sufficient for stable importance ranks
 
 
-def compute_shap(model, X_train: pd.DataFrame, X_test: pd.DataFrame):
+def compute_shap(
+    model: XGBClassifier, X_train: pd.DataFrame, X_test: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray]:
     """Compute exact SHAP values using TreeExplainer (tree_path_dependent mode).
 
     tree_path_dependent is the native fast path for tree ensembles: it uses the
@@ -183,7 +193,7 @@ def compute_shap(model, X_train: pd.DataFrame, X_test: pd.DataFrame):
 
 
 def plot_shap_summary(
-    shap_values: list,
+    shap_values: np.ndarray,
     X_test: pd.DataFrame,
     feature_cols: list[str],
     top_n: int = 20,
