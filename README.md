@@ -36,6 +36,42 @@ An XGBoost classifier that identifies rocket types from radar-tracked 3D flight 
 
 ---
 
+## Solution Design
+
+### Why XGBoost
+
+The problem is **tabular classification on 76 hand-engineered features** — the exact regime where gradient-boosted trees dominate. XGBoost was chosen over alternatives for specific reasons:
+
+- **Over neural networks:** With ~32k trajectories and 76 scalar features, a deep model would overfit without extensive regularisation. XGBoost's histogram binning and built-in L1/L2 regularisation handle this natively. There is no sequential/spatial structure in the aggregated features that a CNN or LSTM could exploit (the raw time series is already reduced to summary statistics).
+- **Over Random Forest:** XGBoost's sequential boosting focuses capacity on hard-to-classify trajectories (the ~33 borderline cases between class 0 and 1), whereas Random Forest treats all samples equally. This matters when the metric penalises the worst class.
+- **Over logistic regression / SVM:** The class boundaries in this feature space are non-linear (e.g., class 2 occupies a specific region of the launch_z × v_horiz plane). Tree-based models handle this without manual feature crosses.
+
+### Pipeline Overview
+
+```
+Raw radar pings (x, y, z, t)
+    │
+    ▼
+Feature Engineering ──► 76 physics features per trajectory
+    │
+    ▼
+XGBoost (multi:softprob) ──► 3-class probability estimates
+    │
+    ▼
+OOB Threshold Tuning ──► bias-adjusted predictions optimised for min-recall
+    │
+    ▼
+submission.csv
+```
+
+The pipeline has three stages, each addressing a different challenge:
+
+1. **Feature engineering** converts variable-length radar sequences into fixed-size vectors that encode the physics of each rocket type.
+2. **XGBoost with softprob** learns the class boundaries and outputs calibrated probabilities rather than hard labels.
+3. **Threshold tuning** post-processes these probabilities with per-class biases to directly optimise the min-recall metric, recovering borderline cases that raw argmax misclassifies.
+
+---
+
 ## How It Works
 
 ### Feature Engineering
@@ -52,6 +88,20 @@ Raw radar pings are aggregated into **76 scalar features** per trajectory via fi
 ### Why These Features Work
 
 Different rocket families have different propellant charges (muzzle velocity), motor types (thrust profile / jerk), airframes (ballistic coefficient / velocity decay), and launch geometry. The 76 features capture exactly these physical quantities. The model achieves near-ceiling recall because the physics are deterministic — a rocket's class is written into its kinematics from the moment of launch.
+
+### Model Configuration
+
+The XGBoost classifier uses `multi:softprob` with 600 histogram-based trees at depth 6:
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| `n_estimators` | 600 | Enough capacity for 76 features; diminishing returns beyond this |
+| `max_depth` | 6 | Deep enough for feature interactions, shallow enough to avoid overfitting 32k samples |
+| `learning_rate` | 0.05 | Conservative shrinkage for stable convergence |
+| `subsample` | 0.8 | Row sampling reduces variance on the minority class |
+| `colsample_bytree` | 0.8 | Feature sampling forces diverse trees |
+| `min_child_weight` | 5 | Prevents splits on tiny leaf groups (important for class 2 with only 2,339 samples) |
+| `objective` | `multi:softprob` | Outputs calibrated probabilities for downstream threshold tuning |
 
 ### Class Imbalance Strategy
 
