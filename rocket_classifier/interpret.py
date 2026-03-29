@@ -128,7 +128,7 @@ def train_model(train_feats: pd.DataFrame):
     groups = np.array(train_feats.index.tolist())
 
     logger.info("Training XGBoost model for SHAP analysis (5-fold CV + full retrain)...")
-    model, fold_scores, train_medians = train_with_cv(X_train, y_train, groups, n_splits=5)
+    model, fold_scores, train_medians, _biases = train_with_cv(X_train, y_train, groups, n_splits=5)
     logger.info("CV min-recall: %.4f ± %.4f", np.mean(fold_scores), np.std(fold_scores))
 
     # Impute NaN for SHAP computation (using the same medians as inference)

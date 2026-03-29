@@ -39,7 +39,7 @@ DEFAULT_XGB_PARAMS: dict = {
     "gamma": 0.1,
     "reg_alpha": 0.1,
     "reg_lambda": 1.0,
-    "objective": "multi:softmax",
+    "objective": "multi:softprob",
     "num_class": 3,
     "eval_metric": "mlogloss",
     # use_label_encoder removed — deprecated in XGBoost 2.0
@@ -115,14 +115,53 @@ def _impute_nan(X: np.ndarray, medians: np.ndarray) -> np.ndarray:
     return X
 
 
+def _optimize_thresholds(
+    y_true: np.ndarray,
+    proba: np.ndarray,
+) -> np.ndarray:
+    """Find per-class log-probability biases that maximise min-recall.
+
+    Performs a coarse-then-fine grid search over bias offsets added to
+    log-probabilities before argmax. Class 0 bias is fixed at 0; biases
+    for classes 1 and 2 are searched.
+
+    Args:
+        y_true: Ground-truth integer labels array of shape (N,).
+        proba: Predicted probability array of shape (N, 3).
+
+    Returns:
+        Bias array of shape (3,) with biases[0] == 0.
+    """
+    lp = np.log(proba + 1e-12)
+    best_score, best_biases = -1.0, np.zeros(3)
+
+    # Coarse grid
+    for b1 in np.linspace(-4, 4, 100):
+        for b2 in np.linspace(-4, 4, 100):
+            b = np.array([0.0, b1, b2])
+            s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
+            if s > best_score:
+                best_score, best_biases = s, b.copy()
+
+    # Fine grid
+    for b1 in np.linspace(best_biases[1] - 0.1, best_biases[1] + 0.1, 60):
+        for b2 in np.linspace(best_biases[2] - 0.1, best_biases[2] + 0.1, 60):
+            b = np.array([0.0, b1, b2])
+            s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
+            if s > best_score:
+                best_score, best_biases = s, b.copy()
+
+    return best_biases
+
+
 def train_with_cv(
     X: pd.DataFrame,
     y: np.ndarray,
     groups: np.ndarray,
     n_splits: int = 5,
     xgb_params: dict | None = None,
-) -> tuple[XGBClassifier, list[float], np.ndarray]:
-    """Train XGBoost with GroupKFold cross-validation, logging per-fold results.
+) -> tuple[XGBClassifier, list[float], np.ndarray, np.ndarray]:
+    """Train XGBoost with GroupKFold cross-validation and threshold tuning.
 
     Data leakage prevention:
         1. ``GroupKFold`` on ``traj_ind`` ensures that all radar points
@@ -132,7 +171,9 @@ def train_with_cv(
            preventing information from the validation fold from leaking
            into the imputed training features.
 
-    After cross-validation, the model is retrained on the full dataset.
+    After cross-validation, per-class log-probability biases are optimised
+    on the collected OOB predictions to maximise min-recall. The model is
+    then retrained on the full dataset.
 
     Args:
         X: Per-trajectory feature DataFrame (may contain NaN). Rows
@@ -148,9 +189,12 @@ def train_with_cv(
     Returns:
         A tuple of:
             - model: ``XGBClassifier`` retrained on the full dataset.
-            - fold_scores: List of per-fold min-recall scores.
+            - fold_scores: List of per-fold min-recall scores (with
+              threshold tuning applied via global OOB biases).
             - train_medians: Per-column median array used for NaN
               imputation on the full training set (needed at inference).
+            - biases: Per-class log-probability bias array of shape (3,)
+              for threshold-tuned prediction at inference time.
     """
     feature_cols = _get_feature_cols(X)
     X_raw = X[feature_cols].to_numpy(dtype=np.float32)
@@ -158,7 +202,8 @@ def train_with_cv(
     params = {**DEFAULT_XGB_PARAMS, **(xgb_params or {})}
 
     gkf = GroupKFold(n_splits=n_splits)
-    fold_scores: list[float] = []
+    fold_scores_raw: list[float] = []
+    all_oob_proba = np.zeros((len(y), 3))
 
     for fold, (train_idx, val_idx) in enumerate(gkf.split(X_raw, y, groups), 1):
         X_tr, X_val = X_raw[train_idx].copy(), X_raw[val_idx].copy()
@@ -180,7 +225,9 @@ def train_with_cv(
             verbose=False,
         )
 
-        y_pred = model.predict(X_val)
+        proba_val = model.predict_proba(X_val)
+        all_oob_proba[val_idx] = proba_val
+        y_pred = np.argmax(proba_val, axis=1)
         score = min_class_recall(y_val, y_pred)
 
         # Per-class recall breakdown
@@ -197,12 +244,30 @@ def train_with_cv(
             score,
             "  ".join(per_class),
         )
-        fold_scores.append(score)
+        fold_scores_raw.append(score)
+
+    # Optimise per-class biases on all OOB predictions
+    biases = _optimize_thresholds(y, all_oob_proba)
+    logger.info("Optimised biases: [%.4f, %.4f, %.4f]", *biases)
+
+    # Re-evaluate per-fold with global biases
+    fold_scores: list[float] = []
+    for _fold, (_, val_idx) in enumerate(gkf.split(X_raw, y, groups), 1):
+        adjusted = np.log(all_oob_proba[val_idx] + 1e-12) + biases
+        preds = np.argmax(adjusted, axis=1)
+        s = min_class_recall(y[val_idx], preds)
+        fold_scores.append(s)
 
     logger.info(
-        "CV min-recall: %.4f ± %.4f (mean ± std)",
+        "CV min-recall (raw):  %.4f ± %.4f",
+        np.mean(fold_scores_raw),
+        np.std(fold_scores_raw),
+    )
+    logger.info(
+        "CV min-recall (tuned): %.4f ± %.4f  per-fold=%s",
         np.mean(fold_scores),
         np.std(fold_scores),
+        [f"{s:.4f}" for s in fold_scores],
     )
 
     # Retrain on full data with full-data medians
@@ -215,11 +280,16 @@ def train_with_cv(
     final_model = XGBClassifier(**params)
     final_model.fit(X_full, y, sample_weight=sample_weights_full, verbose=False)
 
-    return final_model, fold_scores, train_medians
+    return final_model, fold_scores, train_medians, biases
 
 
-def predict(model: XGBClassifier, X: pd.DataFrame, train_medians: np.ndarray) -> np.ndarray:
-    """Generate class predictions for the given feature matrix.
+def predict(
+    model: XGBClassifier,
+    X: pd.DataFrame,
+    train_medians: np.ndarray,
+    biases: np.ndarray | None = None,
+) -> np.ndarray:
+    """Generate class predictions with optional threshold tuning.
 
     Args:
         model: Fitted ``XGBClassifier`` instance returned by ``train_with_cv``.
@@ -227,6 +297,9 @@ def predict(model: XGBClassifier, X: pd.DataFrame, train_medians: np.ndarray) ->
             during training. A ``"label"`` column is ignored if present.
         train_medians: Per-column median array from training data, used
             to fill NaN values consistently with training.
+        biases: Optional per-class log-probability bias array of shape (3,)
+            from threshold optimisation. When provided, predictions use
+            bias-adjusted probabilities instead of raw argmax.
 
     Returns:
         Integer array of shape (n_trajectories,) with predicted class labels
@@ -235,4 +308,9 @@ def predict(model: XGBClassifier, X: pd.DataFrame, train_medians: np.ndarray) ->
     feature_cols = _get_feature_cols(X)
     X_vals = X[feature_cols].to_numpy(dtype=np.float32)
     _impute_nan(X_vals, train_medians)
-    return model.predict(X_vals).astype(int)
+
+    if biases is not None:
+        proba = model.predict_proba(X_vals)
+        adjusted = np.log(proba + 1e-12) + biases
+        return np.argmax(adjusted, axis=1).astype(int)
+    return np.argmax(model.predict_proba(X_vals), axis=1).astype(int)
