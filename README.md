@@ -23,16 +23,16 @@ An XGBoost classifier that identifies rocket types from radar-tracked 3D flight 
 \text{score} = \min_{j \in \{0,1,2\}} \frac{\sum_i \mathbf{1}[y_i = j \;\wedge\; \hat{y}_i = j]}{\sum_i \mathbf{1}[y_i = j]}
 ```
 
-**Result:** 5-fold GroupKFold cross-validation min-recall of **0.9949 ± 0.0022** — fewer than 1 in 200 rockets misclassified in the worst class.
+**Result:** 5-fold GroupKFold cross-validation min-recall of **0.9966 ± 0.0015** — fewer than 1 in 200 rockets misclassified in the worst class.
 
 | Fold | Min-Recall | Class 0 | Class 1 | Class 2 |
 |------|-----------|---------|---------|---------|
-| 1    | 0.9915    | 1.000   | 0.998   | 0.992   |
-| 2    | 0.9978    | 0.999   | 0.999   | 0.998   |
-| 3    | 0.9958    | 0.999   | 1.000   | 0.996   |
-| 4    | 0.9958    | 0.999   | 0.998   | 0.996   |
-| 5    | 0.9934    | 1.000   | 0.998   | 0.993   |
-| **Mean** | **0.9949 ± 0.0022** | | | |
+| 1    | 0.9979    | 1.000   | 0.999   | 0.998   |
+| 2    | 0.9977    | 0.999   | 0.999   | 0.998   |
+| 3    | 0.9978    | 1.000   | 0.999   | 0.998   |
+| 4    | 0.9940    | 0.999   | 0.997   | 0.994   |
+| 5    | 0.9959    | 1.000   | 0.999   | 0.996   |
+| **Mean** | **0.9966 ± 0.0015** | | | |
 
 ---
 
