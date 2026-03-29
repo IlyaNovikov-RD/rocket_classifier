@@ -1,28 +1,32 @@
 # Rocket Classifier — project automation
 #
-# Prerequisites: Poetry must be installed and available as `poetry`.
-#   https://python-poetry.org/docs/#installation
+# Prerequisites: uv must be installed.
+#   https://docs.astral.sh/uv/getting-started/installation/
 #
 # Usage:
-#   make install    Install all dependencies into the Poetry virtualenv
-#   make test       Run the full pytest suite (55 unit tests)
+#   make install    Install all dependencies via uv
+#   make test       Run the full pytest suite
 #   make lint       Check code quality with ruff
 #   make format     Auto-format source files with ruff
-#   make demo       Launch the Streamlit interactive demo in your browser
+#   make demo       Launch the Streamlit interactive demo
+#   make lock       Regenerate uv.lock from pyproject.toml
 
-.PHONY: install test lint format demo
+.PHONY: install test lint format demo lock
 
 install:
-	poetry install
+	uv sync
 
 test:
-	poetry run pytest tests/ -v
+	uv run pytest tests/ -v
 
 lint:
-	poetry run ruff check .
+	uv run ruff check .
 
 format:
-	poetry run ruff format .
+	uv run ruff format .
 
 demo:
-	poetry run streamlit run src/app.py
+	uv run streamlit run rocket_classifier/app.py
+
+lock:
+	uv lock
