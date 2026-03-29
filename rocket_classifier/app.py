@@ -29,6 +29,7 @@ from rocket_classifier.features import _extract_trajectory_features
 
 MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
 MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
+BIASES_PATH = Path(__file__).parent.parent / "threshold_biases.npy"
 MODEL_RELEASE_URL = (
     "https://github.com/IlyaNovikov-RD/rocket_classifier"
     "/releases/download/v1.0.0/model.pkl"
@@ -115,6 +116,18 @@ def load_train_medians() -> np.ndarray | None:
     import io
 
     return np.load(io.BytesIO(medians_bytes))
+
+
+@st.cache_resource
+def load_threshold_biases() -> np.ndarray | None:
+    """Load per-class log-probability biases for threshold-tuned prediction.
+
+    Returns:
+        NumPy array of shape (3,), or ``None`` if unavailable.
+    """
+    if BIASES_PATH.exists():
+        return np.load(BIASES_PATH)
+    return None
 
 
 @st.cache_data
@@ -237,12 +250,13 @@ def classify(
 
     X = vec.reshape(1, -1)
 
-    class_idx = int(model.predict(X)[0])
-    try:
-        proba = model.predict_proba(X)[0]
-    except Exception:
-        proba = np.zeros(3, dtype=np.float32)
-        proba[class_idx] = 1.0
+    proba = model.predict_proba(X)[0]
+    biases = load_threshold_biases()
+    if biases is not None:
+        adjusted = np.log(proba + 1e-12) + biases
+        class_idx = int(np.argmax(adjusted))
+    else:
+        class_idx = int(np.argmax(proba))
     return class_idx, proba
 
 

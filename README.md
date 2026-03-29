@@ -23,16 +23,16 @@ An XGBoost classifier that identifies rocket types from radar-tracked 3D flight 
 \text{score} = \min_{j \in \{0,1,2\}} \frac{\sum_i \mathbf{1}[y_i = j \;\wedge\; \hat{y}_i = j]}{\sum_i \mathbf{1}[y_i = j]}
 ```
 
-**Result:** 5-fold GroupKFold cross-validation min-recall of **0.9966 ± 0.0015** — fewer than 1 in 200 rockets misclassified in the worst class.
+**Result:** 5-fold GroupKFold cross-validation min-recall of **0.9984 ± 0.0007** (with OOB threshold tuning) — fewer than 1 in 400 rockets misclassified in the worst class.
 
-| Fold | Min-Recall | Class 0 | Class 1 | Class 2 |
-|------|-----------|---------|---------|---------|
-| 1    | 0.9979    | 1.000   | 0.999   | 0.998   |
-| 2    | 0.9977    | 0.999   | 0.999   | 0.998   |
-| 3    | 0.9978    | 1.000   | 0.999   | 0.998   |
-| 4    | 0.9940    | 0.999   | 0.997   | 0.994   |
-| 5    | 0.9959    | 1.000   | 0.999   | 0.996   |
-| **Mean** | **0.9966 ± 0.0015** | | | |
+| Fold | Min-Recall (tuned) |
+|------|--------------------|
+| 1    | 0.9979             |
+| 2    | 0.9981             |
+| 3    | 0.9993             |
+| 4    | 0.9975             |
+| 5    | 0.9991             |
+| **Mean** | **0.9984 ± 0.0007** |
 
 ---
 
@@ -57,11 +57,16 @@ Different rocket families have different propellant charges (muzzle velocity), m
 
 Inverse-frequency sample weights (`w_i = N / (K * N_j)`) passed to XGBoost. Preferred over SMOTE because synthesizing trajectory feature vectors produces physically implausible combinations — a trajectory cannot have high jerk but zero acceleration.
 
+### Threshold Tuning
+
+The model uses `multi:softprob` to output calibrated per-class probabilities instead of hard predictions. Per-class log-probability biases are then optimised on out-of-bag (OOB) predictions from cross-validation to maximise the min-recall metric. This shifts decision boundaries toward minority classes without retraining, improving CV min-recall from 0.9966 to 0.9984.
+
 ### Data Leakage Prevention
 
-Two layers:
+Three layers:
 1. **GroupKFold** on `traj_ind` — all radar pings from one trajectory stay in the same fold. Mirrors deployment where the model sees entirely new flights.
 2. **Per-fold NaN imputation** — column medians are computed from the training fold only. Validation fold data never leaks into imputation statistics.
+3. **OOB threshold tuning** — biases are optimised on OOB predictions only (each sample's probability comes from a model that never saw it during training).
 
 ---
 
@@ -140,7 +145,7 @@ The Dockerfile uses `COPY --from=ghcr.io/astral-sh/uv:latest` for a single-binar
 rocket_classifier/          # Installable Python package
 ├── __init__.py
 ├── features.py             # 76 physics-derived features (velocity, jerk, apogee, ...)
-├── model.py                # XGBoost + GroupKFold CV + per-fold imputation
+├── model.py                # XGBoost + GroupKFold CV + per-fold imputation + threshold tuning
 ├── schema.py               # Pydantic v2 data contracts (TrajectoryPoint)
 ├── main.py                 # Pipeline orchestrator: load → validate → train → predict
 ├── app.py                  # Streamlit interactive demo

@@ -252,7 +252,7 @@ def train_with_cv(
 
     # Re-evaluate per-fold with global biases
     fold_scores: list[float] = []
-    for fold, (_, val_idx) in enumerate(gkf.split(X_raw, y, groups), 1):
+    for _fold, (_, val_idx) in enumerate(gkf.split(X_raw, y, groups), 1):
         adjusted = np.log(all_oob_proba[val_idx] + 1e-12) + biases
         preds = np.argmax(adjusted, axis=1)
         s = min_class_recall(y[val_idx], preds)
