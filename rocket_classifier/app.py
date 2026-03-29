@@ -38,6 +38,10 @@ MEDIANS_RELEASE_URL = (
     "https://github.com/IlyaNovikov-RD/rocket_classifier"
     "/releases/download/v1.0.0/train_medians.npy"
 )
+BIASES_RELEASE_URL = (
+    "https://github.com/IlyaNovikov-RD/rocket_classifier"
+    "/releases/download/v1.0.0/threshold_biases.npy"
+)
 
 # ── Display constants ──────────────────────────────────────────────────────────
 CLASS_NAMES = {0: "Class 0", 1: "Class 1", 2: "Class 2"}
@@ -127,7 +131,13 @@ def load_threshold_biases() -> np.ndarray | None:
     """
     if BIASES_PATH.exists():
         return np.load(BIASES_PATH)
-    return None
+
+    biases_bytes = _download_file(BIASES_RELEASE_URL)
+    if biases_bytes is None:
+        return None
+    import io
+
+    return np.load(io.BytesIO(biases_bytes))
 
 
 @st.cache_data

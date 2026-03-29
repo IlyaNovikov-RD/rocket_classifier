@@ -4,3 +4,9 @@ __pycache__/
 *.parquet
 .DS_Store
 poetry.lock
+
+# Model artifacts (stored in GitHub Release, not in repo)
+model.pkl
+train_medians.npy
+threshold_biases.npy
+submission.csv
