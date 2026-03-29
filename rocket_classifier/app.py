@@ -91,7 +91,7 @@ def load_model():
     # Write to a temp path so XGBoost's native loader can read it
     import tempfile
 
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".ubj", delete=False) as f:
         f.write(model_bytes)
         tmp_path = f.name
     model = XGBClassifier()
