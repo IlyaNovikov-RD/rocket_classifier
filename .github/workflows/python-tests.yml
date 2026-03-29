@@ -10,7 +10,7 @@ on:
 
 jobs:
   test:
-    name: Lint & Test
+    name: Run pytest suite
     runs-on: ubuntu-latest
 
     steps:
