@@ -160,9 +160,16 @@ def load_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
     logger.info("Loading data from %s ...", DATA_PATH)
     df = pd.read_csv(DATA_PATH)
 
-    # Exclude meta-columns; everything else is a feature
+    # Keep only numeric columns, then exclude target and group.
+    # This automatically drops datetime strings, text IDs, or any other
+    # non-numeric columns that would cause a ValueError on .to_numpy(float32).
     non_feature = {"label", "group"}
-    feature_cols = [c for c in df.columns if c not in non_feature]
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_cols = [c for c in numeric_cols if c not in non_feature]
+
+    dropped_non_numeric = [c for c in df.columns if c not in numeric_cols and c not in non_feature]
+    if dropped_non_numeric:
+        logger.info("Dropped non-numeric columns: %s", dropped_non_numeric)
 
     X = df[feature_cols].to_numpy(dtype=np.float32)
     y = df["label"].to_numpy(dtype=int)
