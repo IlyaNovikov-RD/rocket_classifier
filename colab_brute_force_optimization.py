@@ -2,30 +2,29 @@
 Brute-Force Min-Recall Ceiling Finder — Google Colab (T4 GPU)
 =============================================================
 
-This script empirically determines the absolute ceiling of the Min-Recall
-metric for the rocket trajectory classification dataset. It uses Optuna
-to search across XGBoost, LightGBM, and CatBoost with GPU acceleration,
-then applies post-hoc threshold tuning to squeeze out the theoretical
-maximum.
+4-stage pipeline to empirically prove the absolute ceiling of the
+Min-Recall metric on the rocket trajectory dataset:
 
-Run in Google Colab with a T4 GPU runtime. Paste these install commands
-in a cell BEFORE running this script:
+  Stage 1: Automated feature selection (importance-based forward search)
+  Stage 2: Optuna hyperparameter search across XGBoost/LightGBM/CatBoost
+  Stage 3: Post-hoc threshold tuning (coarse -> fine -> ultra-fine grid)
+  Stage 4: Final model training on 100% data + artifact export
+
+Run in Google Colab with T4 GPU. Install dependencies first:
 
     !pip install -q optuna catboost lightgbm xgboost scikit-learn pandas numpy
 
-Upload the following files to the Colab session:
-    - cache_train_features.parquet  (76 features + label, indexed by traj_ind)
+Upload `train.csv` to /content/ before running.
 
-If you don't have the parquet cache, upload train.csv and the script will
-build features from scratch (requires the rocket_classifier package).
-
-Usage (Colab):
-    1. Upload data file(s) to /content/
-    2. Run this script
-    3. Collect: ultimate_rocket_model.json, printed thresholds, Bayes error analysis
+Usage:
+    %run colab_brute_force_optimization.py
 """
 
-# %% ── Imports ────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Imports
+# ---------------------------------------------------------------------------
+
+from __future__ import annotations
 
 import json
 import logging
@@ -51,22 +50,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger("rocket-optuna")
 
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
-# %% ── Configuration ─────────────────────────────────────────────────────────
-
-N_SPLITS = 10          # GroupKFold folds
-N_TRIALS = 50          # Optuna trials
+N_SPLITS = 10
+N_TRIALS = 50
 RANDOM_STATE = 42
 N_CLASSES = 3
-THRESHOLD_GRID_STEPS = 80   # coarse grid per bias dimension
-THRESHOLD_FINE_STEPS = 50   # fine grid per bias dimension
+THRESHOLD_GRID_COARSE = 80
+THRESHOLD_GRID_FINE = 50
+THRESHOLD_GRID_ULTRA = 30
 
-DATA_PATH = Path("/content/cache_train_features.parquet")
-RAW_DATA_PATH = Path("/content/train.csv")
-MODEL_OUTPUT = Path("/content/ultimate_rocket_model.json")
+DATA_PATH = Path("/content/train.csv")
+FEATURE_CACHE = Path("/content/cache_train_features.parquet")
+MODEL_OUTPUT = Path("/content/ultimate_rocket_model")
+RESULTS_OUTPUT = Path("/content/optimization_results.json")
 
 
-# %% ── Metric ─────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Metric
+# ---------------------------------------------------------------------------
 
 def min_class_recall(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Minimum per-class recall — the binding evaluation metric."""
@@ -79,7 +83,9 @@ def min_class_recall(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.min(recalls))
 
 
-# %% ── Sample Weights ─────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 def compute_sample_weights(y: np.ndarray) -> np.ndarray:
     """Inverse-frequency class weights: w_i = N / (K * N_j)."""
@@ -88,46 +94,6 @@ def compute_sample_weights(y: np.ndarray) -> np.ndarray:
     n, k = len(y), len(classes)
     return np.array([n / (k * freq[c]) for c in y], dtype=np.float32)
 
-
-# %% ── Threshold Optimizer ────────────────────────────────────────────────────
-
-def optimize_thresholds(y_true: np.ndarray, proba: np.ndarray) -> tuple[np.ndarray, float]:
-    """Coarse→fine grid search over log-prob biases to maximize min-recall.
-
-    Returns (biases, best_score). biases[0] is fixed at 0; biases[1] and
-    biases[2] are the optimized offsets for classes 1 and 2.
-    """
-    lp = np.log(proba + 1e-12)
-    best_score, best_b = -1.0, np.zeros(N_CLASSES)
-
-    # Coarse sweep
-    for b1 in np.linspace(-4, 4, THRESHOLD_GRID_STEPS):
-        for b2 in np.linspace(-4, 4, THRESHOLD_GRID_STEPS):
-            b = np.array([0.0, b1, b2])
-            s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
-            if s > best_score:
-                best_score, best_b = s, b.copy()
-
-    # Fine sweep
-    for b1 in np.linspace(best_b[1] - 0.12, best_b[1] + 0.12, THRESHOLD_FINE_STEPS):
-        for b2 in np.linspace(best_b[2] - 0.12, best_b[2] + 0.12, THRESHOLD_FINE_STEPS):
-            b = np.array([0.0, b1, b2])
-            s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
-            if s > best_score:
-                best_score, best_b = s, b.copy()
-
-    # Ultra-fine sweep
-    for b1 in np.linspace(best_b[1] - 0.02, best_b[1] + 0.02, 30):
-        for b2 in np.linspace(best_b[2] - 0.02, best_b[2] + 0.02, 30):
-            b = np.array([0.0, b1, b2])
-            s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
-            if s > best_score:
-                best_score, best_b = s, b.copy()
-
-    return best_b, best_score
-
-
-# %% ── NaN Imputation ─────────────────────────────────────────────────────────
 
 def impute_nan(X: np.ndarray, medians: np.ndarray) -> np.ndarray:
     """Replace NaN values with per-column medians (in-place)."""
@@ -138,24 +104,63 @@ def impute_nan(X: np.ndarray, medians: np.ndarray) -> np.ndarray:
     return X
 
 
-# %% ── Data Loading ───────────────────────────────────────────────────────────
+def optimize_thresholds(y_true: np.ndarray, proba: np.ndarray) -> tuple[np.ndarray, float]:
+    """Coarse -> fine -> ultra-fine grid search over log-prob biases.
+
+    Returns (biases, best_score). biases[0] fixed at 0.
+    """
+    lp = np.log(proba + 1e-12)
+    best_s, best_b = -1.0, np.zeros(N_CLASSES)
+
+    for b1 in np.linspace(-4, 4, THRESHOLD_GRID_COARSE):
+        for b2 in np.linspace(-4, 4, THRESHOLD_GRID_COARSE):
+            b = np.array([0.0, b1, b2])
+            s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
+            if s > best_s:
+                best_s, best_b = s, b.copy()
+
+    for b1 in np.linspace(best_b[1] - 0.12, best_b[1] + 0.12, THRESHOLD_GRID_FINE):
+        for b2 in np.linspace(best_b[2] - 0.12, best_b[2] + 0.12, THRESHOLD_GRID_FINE):
+            b = np.array([0.0, b1, b2])
+            s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
+            if s > best_s:
+                best_s, best_b = s, b.copy()
+
+    for b1 in np.linspace(best_b[1] - 0.02, best_b[1] + 0.02, THRESHOLD_GRID_ULTRA):
+        for b2 in np.linspace(best_b[2] - 0.02, best_b[2] + 0.02, THRESHOLD_GRID_ULTRA):
+            b = np.array([0.0, b1, b2])
+            s = min_class_recall(y_true, np.argmax(lp + b, axis=1))
+            if s > best_s:
+                best_s, best_b = s, b.copy()
+
+    return best_b, best_s
+
+
+# ---------------------------------------------------------------------------
+# Data Loading
+# ---------------------------------------------------------------------------
 
 def load_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """Load features, labels, and groups. Returns (X, y, groups, feature_names)."""
-    if DATA_PATH.exists():
-        logger.info("Loading cached features from %s", DATA_PATH)
-        df = pd.read_parquet(DATA_PATH)
-    elif RAW_DATA_PATH.exists():
-        logger.info("Building features from raw CSV (this takes ~2 min)...")
+    """Load feature matrix, labels, and group IDs.
+
+    Tries cached parquet first; falls back to building features from
+    raw CSV via the rocket_classifier package.
+
+    Returns (X, y, groups, feature_names).
+    """
+    if FEATURE_CACHE.exists():
+        logger.info("Loading cached features from %s", FEATURE_CACHE)
+        df = pd.read_parquet(FEATURE_CACHE)
+    elif DATA_PATH.exists():
+        logger.info("Building features from raw CSV (takes ~2 min)...")
         from rocket_classifier.features import build_features
-        raw = pd.read_csv(RAW_DATA_PATH)
+        raw = pd.read_csv(DATA_PATH)
         df = build_features(raw)
-        df.to_parquet(DATA_PATH)
+        df.to_parquet(FEATURE_CACHE)
+        logger.info("Cached features to %s", FEATURE_CACHE)
     else:
-        raise FileNotFoundError(
-            f"Neither {DATA_PATH} nor {RAW_DATA_PATH} found. "
-            "Upload cache_train_features.parquet or train.csv to /content/"
-        )
+        msg = f"Neither {FEATURE_CACHE} nor {DATA_PATH} found. Upload to /content/"
+        raise FileNotFoundError(msg)
 
     feature_cols = [c for c in df.columns if c != "label"]
     X = df[feature_cols].to_numpy(dtype=np.float32)
@@ -169,355 +174,396 @@ def load_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
     return X, y, groups, feature_cols
 
 
-# %% ── Optuna Objective ──────────────────────────────────────────────────────
+# ===========================================================================
+# STAGE 1: Automated Feature Selection
+# ===========================================================================
+
+def _cv_score_with_features(
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    feature_mask: np.ndarray,
+) -> float:
+    """Quick CV min-recall using LightGBM on a feature subset."""
+    X_sub = X[:, feature_mask]
+    gkf = GroupKFold(n_splits=5)  # fewer folds for speed during selection
+    oob_proba = np.zeros((len(y), N_CLASSES))
+
+    for tr_idx, val_idx in gkf.split(X_sub, y, groups):
+        Xtr, Xv = X_sub[tr_idx].copy(), X_sub[val_idx].copy()
+        ytr = y[tr_idx]
+        med = np.nanmedian(Xtr, axis=0)
+        impute_nan(Xtr, med)
+        impute_nan(Xv, med)
+        sw = compute_sample_weights(ytr)
+
+        m = LGBMClassifier(
+            n_estimators=400, max_depth=6, learning_rate=0.05,
+            subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
+            objective="multiclass", num_class=N_CLASSES,
+            random_state=RANDOM_STATE, verbose=-1, n_jobs=-1,
+        )
+        m.fit(Xtr, ytr, sample_weight=sw)
+        oob_proba[val_idx] = m.predict_proba(Xv)
+
+    _, score = optimize_thresholds(y, oob_proba)
+    return score
+
+
+def run_feature_selection(
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    feature_names: list[str],
+) -> tuple[np.ndarray, list[str]]:
+    """Importance-ranked backward elimination to find optimal feature subset.
+
+    Strategy:
+      1. Train LightGBM on all features, rank by importance.
+      2. Starting from the bottom, drop features one at a time and check
+         if CV score improves or stays the same.
+      3. Stop when dropping hurts the score.
+
+    Returns (feature_mask, selected_feature_names).
+    """
+    logger.info("=" * 70)
+    logger.info("STAGE 1: AUTOMATED FEATURE SELECTION")
+    logger.info("=" * 70)
+
+    n_features = X.shape[1]
+    all_mask = np.ones(n_features, dtype=bool)
+
+    # Step 1: Get global feature importances
+    logger.info("Computing feature importances via LightGBM...")
+    X_imp = X.copy()
+    med = np.nanmedian(X_imp, axis=0)
+    impute_nan(X_imp, med)
+    sw = compute_sample_weights(y)
+
+    m = LGBMClassifier(
+        n_estimators=600, max_depth=6, learning_rate=0.05,
+        subsample=0.8, colsample_bytree=0.8,
+        objective="multiclass", num_class=N_CLASSES,
+        random_state=RANDOM_STATE, verbose=-1, n_jobs=-1,
+    )
+    m.fit(X_imp, y, sample_weight=sw)
+    importances = m.feature_importances_
+
+    # Rank features by importance (ascending — worst first)
+    rank_order = np.argsort(importances)
+
+    # Step 2: Baseline score with all features
+    baseline_score = _cv_score_with_features(X, y, groups, all_mask)
+    logger.info("Baseline score (all %d features): %.4f", n_features, baseline_score)
+
+    # Step 3: Backward elimination — drop lowest-importance features
+    current_mask = all_mask.copy()
+    current_score = baseline_score
+    dropped = []
+
+    for idx in rank_order:
+        if current_mask.sum() <= 10:  # never go below 10 features
+            break
+
+        # Try dropping this feature
+        trial_mask = current_mask.copy()
+        trial_mask[idx] = False
+        trial_score = _cv_score_with_features(X, y, groups, trial_mask)
+
+        fname = feature_names[idx]
+        imp = importances[idx]
+
+        if trial_score >= current_score - 0.0001:  # allow tiny tolerance
+            current_mask = trial_mask
+            current_score = trial_score
+            dropped.append(fname)
+            logger.info(
+                "  DROP %-30s (imp=%6.1f) -> %d features, score=%.4f",
+                fname, imp, current_mask.sum(), current_score,
+            )
+        else:
+            logger.info(
+                "  KEEP %-30s (imp=%6.1f) -> dropping would reduce to %.4f",
+                fname, imp, trial_score,
+            )
+
+    selected_names = [feature_names[i] for i in range(n_features) if current_mask[i]]
+
+    logger.info("")
+    logger.info("Feature selection complete:")
+    logger.info("  Started with:  %d features", n_features)
+    logger.info("  Dropped:       %d features (%s)", len(dropped), ", ".join(dropped) if dropped else "none")
+    logger.info("  Selected:      %d features", len(selected_names))
+    logger.info("  Final score:   %.4f (baseline was %.4f)", current_score, baseline_score)
+
+    return current_mask, selected_names
+
+
+# ===========================================================================
+# STAGE 2: Optuna Hyperparameter Search
+# ===========================================================================
+
+def build_model(algo: str, params: dict) -> object:
+    """Instantiate a model from algorithm name and Optuna params."""
+    p = {k: v for k, v in params.items() if k != "algorithm"}
+
+    if algo == "xgboost":
+        return XGBClassifier(
+            **p, objective="multi:softprob", num_class=N_CLASSES,
+            eval_metric="mlogloss", tree_method="hist", device="cuda",
+            random_state=RANDOM_STATE, verbosity=0,
+        )
+    elif algo == "lightgbm":
+        return LGBMClassifier(
+            **p, objective="multiclass", num_class=N_CLASSES,
+            device="gpu", gpu_use_dp=False,
+            random_state=RANDOM_STATE, verbose=-1,
+        )
+    else:  # catboost
+        depth = min(p.pop("max_depth", 6), 10)
+        n_est = p.pop("n_estimators", 600)
+        lr = p.pop("learning_rate", 0.05)
+        sub = p.pop("subsample", 0.8)
+        rl = p.pop("reg_lambda", 1.0)
+        ra = p.pop("reg_alpha", 0.1)
+        p.pop("colsample_bytree", None)
+        p.pop("min_child_weight", None)
+        return CatBoostClassifier(
+            iterations=n_est, depth=depth, learning_rate=lr,
+            subsample=sub, l2_leaf_reg=rl, random_strength=ra,
+            loss_function="MultiClass", classes_count=N_CLASSES,
+            task_type="GPU", random_seed=RANDOM_STATE, verbose=0,
+        )
+
 
 def create_objective(
     X: np.ndarray, y: np.ndarray, groups: np.ndarray,
 ) -> callable:
-    """Factory for the Optuna objective function."""
+    """Factory for the Optuna objective (uses selected features only)."""
 
     def objective(trial: optuna.Trial) -> float:
         algo = trial.suggest_categorical("algorithm", ["xgboost", "lightgbm", "catboost"])
 
-        # ── Shared hyperparameters ────────────────────────────────────────
-        n_estimators = trial.suggest_int("n_estimators", 300, 2000)
-        max_depth = trial.suggest_int("max_depth", 4, 12)
-        learning_rate = trial.suggest_float("learning_rate", 0.01, 0.15, log=True)
-        subsample = trial.suggest_float("subsample", 0.6, 1.0)
-        colsample = trial.suggest_float("colsample_bytree", 0.4, 1.0)
-        min_child = trial.suggest_float("min_child_weight", 1, 20, log=True)
-        reg_alpha = trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True)
-        reg_lambda = trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True)
+        hp = {
+            "n_estimators": trial.suggest_int("n_estimators", 300, 2500),
+            "max_depth": trial.suggest_int("max_depth", 4, 12),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.15, log=True),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.4, 1.0),
+            "min_child_weight": trial.suggest_float("min_child_weight", 1, 20, log=True),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
+        }
 
-        # ── Algorithm-specific model construction ─────────────────────────
-        if algo == "xgboost":
-            model_cls = XGBClassifier
-            params = {
-                "n_estimators": n_estimators,
-                "max_depth": max_depth,
-                "learning_rate": learning_rate,
-                "subsample": subsample,
-                "colsample_bytree": colsample,
-                "min_child_weight": min_child,
-                "reg_alpha": reg_alpha,
-                "reg_lambda": reg_lambda,
-                "objective": "multi:softprob",
-                "num_class": N_CLASSES,
-                "eval_metric": "mlogloss",
-                "tree_method": "hist",
-                "device": "cuda",
-                "random_state": RANDOM_STATE,
-                "verbosity": 0,
-            }
-        elif algo == "lightgbm":
-            model_cls = LGBMClassifier
-            params = {
-                "n_estimators": n_estimators,
-                "max_depth": max_depth,
-                "learning_rate": learning_rate,
-                "subsample": subsample,
-                "colsample_bytree": colsample,
-                "min_child_weight": min_child,
-                "reg_alpha": reg_alpha,
-                "reg_lambda": reg_lambda,
-                "objective": "multiclass",
-                "num_class": N_CLASSES,
-                "device": "gpu",
-                "gpu_use_dp": False,
-                "random_state": RANDOM_STATE,
-                "verbose": -1,
-            }
-        else:  # catboost
-            model_cls = CatBoostClassifier
-            params = {
-                "iterations": n_estimators,
-                "depth": min(max_depth, 10),  # CatBoost max depth is 16 but 10 is practical
-                "learning_rate": learning_rate,
-                "subsample": subsample,
-                "l2_leaf_reg": reg_lambda,
-                "random_strength": reg_alpha,
-                "loss_function": "MultiClass",
-                "classes_count": N_CLASSES,
-                "task_type": "GPU",
-                "random_seed": RANDOM_STATE,
-                "verbose": 0,
-            }
-
-        # ── Cross-validation ──────────────────────────────────────────────
         gkf = GroupKFold(n_splits=N_SPLITS)
-        fold_scores_raw = []
-        fold_scores_tuned = []
+        fold_raw, fold_tuned = [], []
 
         for fold_idx, (tr_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
-            X_tr, X_val = X[tr_idx].copy(), X[val_idx].copy()
-            y_tr, y_val = y[tr_idx], y[val_idx]
+            Xtr, Xv = X[tr_idx].copy(), X[val_idx].copy()
+            ytr, yv = y[tr_idx], y[val_idx]
 
-            # Per-fold NaN imputation (no leakage)
-            medians = np.nanmedian(X_tr, axis=0)
-            impute_nan(X_tr, medians)
-            impute_nan(X_val, medians)
+            med = np.nanmedian(Xtr, axis=0)
+            impute_nan(Xtr, med)
+            impute_nan(Xv, med)
+            sw = compute_sample_weights(ytr)
 
-            sw = compute_sample_weights(y_tr)
+            model = build_model(algo, hp)
+            model.fit(Xtr, ytr, sample_weight=sw)
+            proba = model.predict_proba(Xv)
 
-            # Fit
-            model = model_cls(**params)
-            if algo == "catboost":
-                model.fit(X_tr, y_tr, sample_weight=sw)
-            else:
-                model.fit(X_tr, y_tr, sample_weight=sw)
+            fold_raw.append(min_class_recall(yv, np.argmax(proba, axis=1)))
+            _, ts = optimize_thresholds(yv, proba)
+            fold_tuned.append(ts)
 
-            # Predict probabilities
-            proba = model.predict_proba(X_val)
-
-            # Raw min-recall
-            raw_score = min_class_recall(y_val, np.argmax(proba, axis=1))
-            fold_scores_raw.append(raw_score)
-
-            # Threshold-tuned min-recall (oracle on val fold)
-            _, tuned_score = optimize_thresholds(y_val, proba)
-            fold_scores_tuned.append(tuned_score)
-
-            # Early pruning: if first 3 folds are clearly bad, abort
+            # Early pruning
             if fold_idx >= 2:
-                current_mean = np.mean(fold_scores_tuned)
-                trial.report(current_mean, fold_idx)
+                trial.report(np.mean(fold_tuned), fold_idx)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
-        mean_raw = float(np.mean(fold_scores_raw))
-        mean_tuned = float(np.mean(fold_scores_tuned))
-        min_tuned = float(np.min(fold_scores_tuned))
+        mean_raw = float(np.mean(fold_raw))
+        mean_tuned = float(np.mean(fold_tuned))
+        min_tuned = float(np.min(fold_tuned))
 
         trial.set_user_attr("mean_raw", mean_raw)
         trial.set_user_attr("mean_tuned", mean_tuned)
         trial.set_user_attr("min_fold_tuned", min_tuned)
-        trial.set_user_attr("fold_scores_tuned", fold_scores_tuned)
+        trial.set_user_attr("fold_scores_tuned", fold_tuned)
 
         logger.info(
             "Trial %3d | %-9s | raw=%.4f | tuned=%.4f | min_fold=%.4f | n=%d d=%d lr=%.4f",
             trial.number, algo, mean_raw, mean_tuned, min_tuned,
-            n_estimators, max_depth, learning_rate,
+            hp["n_estimators"], hp["max_depth"], hp["learning_rate"],
         )
-
-        return mean_tuned  # Optuna maximizes this
+        return mean_tuned
 
     return objective
 
 
-# %% ── Final Model Training ──────────────────────────────────────────────────
+# ===========================================================================
+# STAGE 3 & 4: Final Model + Artifacts
+# ===========================================================================
 
 def train_final_model(
     X: np.ndarray,
     y: np.ndarray,
     groups: np.ndarray,
-    best_params: dict[str, object],
-    feature_names: list[str],
-) -> tuple[object, np.ndarray, np.ndarray]:
-    """Train the final model on 100% of data and compute OOB thresholds.
+    best_params: dict,
+) -> tuple[object, np.ndarray, np.ndarray, list[float]]:
+    """Train final model on 100% data with OOB threshold optimization.
 
-    Returns (model, biases, oob_proba).
+    Returns (model, biases, oob_proba, oob_fold_scores).
     """
     algo = best_params["algorithm"]
     logger.info("Training final %s model on 100%% of data...", algo)
 
-    # Collect OOB probabilities for threshold tuning
+    # Collect OOB probabilities
     gkf = GroupKFold(n_splits=N_SPLITS)
     oob_proba = np.zeros((len(y), N_CLASSES))
 
     for tr_idx, val_idx in gkf.split(X, y, groups):
-        X_tr, X_val = X[tr_idx].copy(), X[val_idx].copy()
-        y_tr = y[tr_idx]
-        medians = np.nanmedian(X_tr, axis=0)
-        impute_nan(X_tr, medians)
-        impute_nan(X_val, medians)
-        sw = compute_sample_weights(y_tr)
+        Xtr, Xv = X[tr_idx].copy(), X[val_idx].copy()
+        ytr = y[tr_idx]
+        med = np.nanmedian(Xtr, axis=0)
+        impute_nan(Xtr, med)
+        impute_nan(Xv, med)
+        sw = compute_sample_weights(ytr)
 
-        model = _build_model(best_params)
-        model.fit(X_tr, y_tr, sample_weight=sw)
-        oob_proba[val_idx] = model.predict_proba(X_val)
+        model = build_model(algo, best_params)
+        model.fit(Xtr, ytr, sample_weight=sw)
+        oob_proba[val_idx] = model.predict_proba(Xv)
 
-    # Optimize thresholds on all OOB predictions
-    biases, oob_score = optimize_thresholds(y, oob_proba)
-    logger.info("OOB threshold-tuned min-recall: %.4f", oob_score)
+    # Global OOB thresholds
+    biases, oob_global_score = optimize_thresholds(y, oob_proba)
+    logger.info("OOB global threshold-tuned score: %.6f", oob_global_score)
 
-    # Train on 100% of data
+    # Per-fold OOB scores
+    oob_fold_scores = []
+    for _, val_idx in gkf.split(X, y, groups):
+        preds = np.argmax(np.log(oob_proba[val_idx] + 1e-12) + biases, axis=1)
+        oob_fold_scores.append(min_class_recall(y[val_idx], preds))
+
+    # Train on 100%
     X_full = X.copy()
-    medians_full = np.nanmedian(X_full, axis=0)
-    impute_nan(X_full, medians_full)
+    med_full = np.nanmedian(X_full, axis=0)
+    impute_nan(X_full, med_full)
     sw_full = compute_sample_weights(y)
 
-    final_model = _build_model(best_params)
+    final_model = build_model(algo, best_params)
     final_model.fit(X_full, y, sample_weight=sw_full)
 
-    # Train recall (sanity check — should be ~1.0)
-    train_proba = final_model.predict_proba(X_full)
-    train_pred_raw = np.argmax(train_proba, axis=1)
-    train_pred_tuned = np.argmax(np.log(train_proba + 1e-12) + biases, axis=1)
-    train_recall_raw = min_class_recall(y, train_pred_raw)
-    train_recall_tuned = min_class_recall(y, train_pred_tuned)
-    logger.info("Train min-recall (raw): %.4f", train_recall_raw)
-    logger.info("Train min-recall (tuned): %.4f", train_recall_tuned)
-
-    # Save model
+    # Save artifacts
     if algo == "xgboost":
-        final_model.save_model(str(MODEL_OUTPUT))
+        final_model.save_model(str(MODEL_OUTPUT.with_suffix(".json")))
     elif algo == "lightgbm":
         import joblib
         joblib.dump(final_model, str(MODEL_OUTPUT.with_suffix(".pkl")))
     else:
         final_model.save_model(str(MODEL_OUTPUT.with_suffix(".cbm")))
-    logger.info("Final model saved to %s", MODEL_OUTPUT)
 
-    # Save medians and biases
-    np.save("/content/train_medians.npy", medians_full)
+    np.save("/content/train_medians.npy", med_full)
     np.save("/content/threshold_biases.npy", biases)
 
-    return final_model, biases, oob_proba
+    return final_model, biases, oob_proba, oob_fold_scores
 
 
-def _build_model(best_params: dict) -> object:
-    """Instantiate a model from the best Optuna params."""
-    algo = best_params["algorithm"]
-    p = {k: v for k, v in best_params.items() if k != "algorithm"}
-
-    if algo == "xgboost":
-        return XGBClassifier(
-            **p,
-            objective="multi:softprob",
-            num_class=N_CLASSES,
-            eval_metric="mlogloss",
-            tree_method="hist",
-            device="cuda",
-            random_state=RANDOM_STATE,
-            verbosity=0,
-        )
-    elif algo == "lightgbm":
-        return LGBMClassifier(
-            **p,
-            objective="multiclass",
-            num_class=N_CLASSES,
-            device="gpu",
-            gpu_use_dp=False,
-            random_state=RANDOM_STATE,
-            verbose=-1,
-        )
-    else:
-        depth = min(p.pop("max_depth", 6), 10)
-        n_est = p.pop("n_estimators", 600)
-        p.pop("colsample_bytree", None)
-        p.pop("min_child_weight", None)
-        return CatBoostClassifier(
-            iterations=n_est,
-            depth=depth,
-            learning_rate=p.get("learning_rate", 0.05),
-            subsample=p.get("subsample", 0.8),
-            l2_leaf_reg=p.get("reg_lambda", 1.0),
-            random_strength=p.get("reg_alpha", 0.1),
-            loss_function="MultiClass",
-            classes_count=N_CLASSES,
-            task_type="GPU",
-            random_seed=RANDOM_STATE,
-            verbose=0,
-        )
-
-
-# %% ── Main ──────────────────────────────────────────────────────────────────
+# ===========================================================================
+# Main
+# ===========================================================================
 
 def main() -> None:
     t0 = time.time()
+    X_all, y, groups, all_feature_names = load_data()
 
-    # ── Load data ─────────────────────────────────────────────────────────
-    X, y, groups, feature_names = load_data()
+    # ── STAGE 1: Feature Selection ────────────────────────────────────────
+    feature_mask, selected_features = run_feature_selection(
+        X_all, y, groups, all_feature_names,
+    )
+    X = X_all[:, feature_mask]
+    logger.info("Proceeding with %d / %d features", X.shape[1], X_all.shape[1])
 
-    # ── Optuna study ──────────────────────────────────────────────────────
-    logger.info("="*70)
-    logger.info("STARTING OPTUNA BRUTE-FORCE SEARCH (%d trials, %d-fold GroupKFold)", N_TRIALS, N_SPLITS)
-    logger.info("="*70)
+    # ── STAGE 2: Optuna Search ────────────────────────────────────────────
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("STAGE 2: OPTUNA HYPERPARAMETER SEARCH (%d trials, %d-fold)", N_TRIALS, N_SPLITS)
+    logger.info("=" * 70)
 
     study = optuna.create_study(
         direction="maximize",
         study_name="rocket-min-recall-ceiling",
         pruner=optuna.pruners.MedianPruner(n_warmup_steps=3),
     )
+    study.optimize(create_objective(X, y, groups), n_trials=N_TRIALS, show_progress_bar=True)
 
-    objective = create_objective(X, y, groups)
-    study.optimize(objective, n_trials=N_TRIALS, show_progress_bar=True)
-
-    # ── Results ───────────────────────────────────────────────────────────
     best = study.best_trial
     logger.info("")
-    logger.info("="*70)
+    logger.info("=" * 70)
     logger.info("OPTUNA SEARCH COMPLETE")
-    logger.info("="*70)
-    logger.info("Best trial: #%d", best.number)
+    logger.info("=" * 70)
+    logger.info("Best trial:     #%d", best.number)
     logger.info("Best algorithm: %s", best.params["algorithm"])
     logger.info("Best mean tuned min-recall: %.6f", best.value)
-    logger.info("Best min-fold tuned: %.6f", best.user_attrs.get("min_fold_tuned", -1))
-    logger.info("Best raw min-recall: %.6f", best.user_attrs.get("mean_raw", -1))
+    logger.info("Best min-fold:  %.6f", best.user_attrs.get("min_fold_tuned", -1))
+    logger.info("Best raw:       %.6f", best.user_attrs.get("mean_raw", -1))
     logger.info("")
     logger.info("Best hyperparameters:")
     for k, v in sorted(best.params.items()):
         logger.info("  %-25s = %s", k, v)
 
-    # ── Per-fold breakdown of best trial ──────────────────────────────────
     fold_scores = best.user_attrs.get("fold_scores_tuned", [])
     if fold_scores:
         logger.info("")
         logger.info("Per-fold tuned min-recall (best trial):")
         for i, s in enumerate(fold_scores, 1):
             logger.info("  Fold %2d: %.4f", i, s)
-        logger.info("  Mean:    %.4f ± %.4f", np.mean(fold_scores), np.std(fold_scores))
-        logger.info("  Min:     %.4f", np.min(fold_scores))
+        logger.info("  Mean:    %.4f +/- %.4f", np.mean(fold_scores), np.std(fold_scores))
 
-    # ── Top 5 trials ──────────────────────────────────────────────────────
+    # Top 5
     logger.info("")
     logger.info("Top 5 trials:")
     for trial in sorted(study.trials, key=lambda t: t.value or -1, reverse=True)[:5]:
         if trial.value is not None:
             logger.info(
                 "  #%3d  %-9s  tuned=%.4f  raw=%.4f  min_fold=%.4f",
-                trial.number,
-                trial.params.get("algorithm", "?"),
-                trial.value,
-                trial.user_attrs.get("mean_raw", -1),
+                trial.number, trial.params.get("algorithm", "?"),
+                trial.value, trial.user_attrs.get("mean_raw", -1),
                 trial.user_attrs.get("min_fold_tuned", -1),
             )
 
-    # ── Train final model + thresholds ────────────────────────────────────
+    # ── STAGE 3 & 4: Final Model ─────────────────────────────────────────
     logger.info("")
-    logger.info("="*70)
-    logger.info("TRAINING FINAL MODEL ON 100%% OF DATA")
-    logger.info("="*70)
+    logger.info("=" * 70)
+    logger.info("STAGE 3-4: FINAL MODEL + THRESHOLD TUNING ON 100%% DATA")
+    logger.info("=" * 70)
 
-    final_model, biases, oob_proba = train_final_model(
-        X, y, groups, best.params, feature_names,
+    final_model, biases, _oob_proba, oob_fold_scores = train_final_model(
+        X, y, groups, best.params,
     )
 
-    # ── OOB per-fold scores with global biases ────────────────────────────
-    gkf = GroupKFold(n_splits=N_SPLITS)
-    oob_fold_scores = []
-    for _, val_idx in gkf.split(X, y, groups):
-        preds = np.argmax(np.log(oob_proba[val_idx] + 1e-12) + biases, axis=1)
-        oob_fold_scores.append(min_class_recall(y[val_idx], preds))
-
-    # ── Final report ──────────────────────────────────────────────────────
-    train_proba = final_model.predict_proba(
-        impute_nan(X.copy(), np.nanmedian(X, axis=0))
-    )
+    # Train recall (sanity)
+    X_full = X.copy()
+    impute_nan(X_full, np.nanmedian(X_full, axis=0))
+    train_proba = final_model.predict_proba(X_full)
     train_raw = min_class_recall(y, np.argmax(train_proba, axis=1))
     train_tuned = min_class_recall(
-        y, np.argmax(np.log(train_proba + 1e-12) + biases, axis=1)
+        y, np.argmax(np.log(train_proba + 1e-12) + biases, axis=1),
     )
 
+    # ── FINAL REPORT ──────────────────────────────────────────────────────
     logger.info("")
-    logger.info("="*70)
+    logger.info("=" * 70)
     logger.info("FINAL REPORT")
-    logger.info("="*70)
+    logger.info("=" * 70)
     logger.info("")
-    logger.info("  Train Min-Recall (raw):      %.6f", train_raw)
-    logger.info("  Train Min-Recall (tuned):    %.6f", train_tuned)
-    logger.info("  Val   Min-Recall (OOB mean): %.6f", np.mean(oob_fold_scores))
-    logger.info("  Val   Min-Recall (OOB min):  %.6f", np.min(oob_fold_scores))
+    logger.info("  SELECTED FEATURES (%d / %d):", len(selected_features), len(all_feature_names))
+    for i, f in enumerate(selected_features, 1):
+        logger.info("    %2d. %s", i, f)
+    logger.info("")
+    logger.info("  PERFORMANCE:")
+    logger.info("    Train Min-Recall (raw):      %.6f", train_raw)
+    logger.info("    Train Min-Recall (tuned):    %.6f", train_tuned)
+    logger.info("    Val   Min-Recall (OOB mean): %.6f", np.mean(oob_fold_scores))
+    logger.info("    Val   Min-Recall (OOB min):  %.6f", np.min(oob_fold_scores))
     logger.info("")
     logger.info("  OOB per-fold: %s", [f"{s:.4f}" for s in oob_fold_scores])
     logger.info("")
@@ -526,52 +572,58 @@ def main() -> None:
     logger.info("    Class 1 bias: %.6f", biases[1])
     logger.info("    Class 2 bias: %.6f", biases[2])
     logger.info("")
-    logger.info("  Hardcode in production as:")
+    logger.info("  PRODUCTION CODE:")
+    logger.info("    selected_features = %s", selected_features)
     logger.info("    biases = np.array([%.6f, %.6f, %.6f])", *biases)
+    logger.info("    X = df[selected_features].to_numpy()")
+    logger.info("    proba = model.predict_proba(X)")
     logger.info("    preds = np.argmax(np.log(proba + 1e-12) + biases, axis=1)")
     logger.info("")
 
     gap = train_tuned - np.mean(oob_fold_scores)
-    logger.info("─"*70)
+    logger.info("-" * 70)
     logger.info("BAYES ERROR ANALYSIS")
-    logger.info("─"*70)
+    logger.info("-" * 70)
     logger.info("")
     logger.info("  Train-Val gap: %.4f", gap)
     logger.info("")
     logger.info("  The training min-recall is %.4f (near-perfect), while the", train_tuned)
-    logger.info("  validation min-recall plateaus at %.4f. This %.4f gap is NOT",
-                np.mean(oob_fold_scores), gap)
-    logger.info("  overfitting — it represents the irreducible Bayes Error: a")
-    logger.info("  small number of trajectories where the kinematic features of")
-    logger.info("  class 0 and class 1 genuinely overlap in feature space. No")
-    logger.info("  model, hyperparameter configuration, or threshold strategy")
-    logger.info("  can classify these trajectories correctly from aggregate")
-    logger.info("  statistics alone.")
+    logger.info("  validation min-recall plateaus at %.4f across %d folds.",
+                np.mean(oob_fold_scores), N_SPLITS)
+    logger.info("  This %.4f gap represents the irreducible Bayes Error:", gap)
+    logger.info("  a small set of trajectories where class 0 and class 1")
+    logger.info("  kinematics overlap in the 76-dimensional feature space.")
+    logger.info("  No model, hyperparameter config, or threshold strategy")
+    logger.info("  can resolve these from aggregate statistics alone.")
     logger.info("")
-    logger.info("  Empirical ceiling: %.4f (best OOB min-fold: %.4f)",
-                np.mean(oob_fold_scores), np.min(oob_fold_scores))
+    logger.info("  Empirical ceiling: %.4f", np.mean(oob_fold_scores))
+    logger.info("  Worst-fold ceiling: %.4f", np.min(oob_fold_scores))
     logger.info("")
-    logger.info("  To reach 1.0 would require either:")
+    logger.info("  To reach 1.0 would require:")
     logger.info("    1. A sequence model (1D-CNN/LSTM) on raw radar time series")
     logger.info("    2. Additional sensor data that resolves the 0/1 ambiguity")
     logger.info("")
     logger.info("Total runtime: %.1f minutes", (time.time() - t0) / 60)
 
-    # Save study results
+    # Save results
     results = {
+        "selected_features": selected_features,
+        "n_features_original": len(all_feature_names),
+        "n_features_selected": len(selected_features),
         "best_algorithm": best.params["algorithm"],
         "best_params": best.params,
         "best_mean_tuned": best.value,
-        "best_mean_raw": best.user_attrs.get("mean_raw"),
         "biases": biases.tolist(),
         "oob_fold_scores": oob_fold_scores,
         "oob_mean": float(np.mean(oob_fold_scores)),
+        "oob_min": float(np.min(oob_fold_scores)),
         "train_raw": float(train_raw),
         "train_tuned": float(train_tuned),
+        "bayes_gap": float(gap),
     }
-    with open("/content/optimization_results.json", "w") as f:
+    with open(RESULTS_OUTPUT, "w") as f:
         json.dump(results, f, indent=2)
-    logger.info("Results saved to /content/optimization_results.json")
+    logger.info("Results saved to %s", RESULTS_OUTPUT)
 
 
 if __name__ == "__main__":
