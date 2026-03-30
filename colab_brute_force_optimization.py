@@ -63,7 +63,6 @@ THRESHOLD_GRID_FINE = 50
 THRESHOLD_GRID_ULTRA = 30
 
 DATA_PATH = Path("/content/train.csv")
-FEATURE_CACHE = Path("/content/cache_train_features.parquet")
 MODEL_OUTPUT = Path("/content/ultimate_rocket_model")
 RESULTS_OUTPUT = Path("/content/optimization_results.json")
 
@@ -141,35 +140,37 @@ def optimize_thresholds(y_true: np.ndarray, proba: np.ndarray) -> tuple[np.ndarr
 # ---------------------------------------------------------------------------
 
 def load_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """Load feature matrix, labels, and group IDs.
+    """Load feature matrix, labels, and group IDs directly from train.csv.
 
-    Tries cached parquet first; falls back to building features from
-    raw CSV via the rocket_classifier package.
+    Expects train.csv to contain:
+      - 76 continuous feature columns
+      - 'label'  (int: 0, 1, 2) — target
+      - 'group'  (int)          — trajectory ID for GroupKFold
+
+    Both 'label' and 'group' are excluded from the feature matrix X.
+    Groups are read from the 'group' column — NOT from the DataFrame index —
+    to prevent data leakage in GroupKFold.
 
     Returns (X, y, groups, feature_names).
     """
-    if FEATURE_CACHE.exists():
-        logger.info("Loading cached features from %s", FEATURE_CACHE)
-        df = pd.read_parquet(FEATURE_CACHE)
-    elif DATA_PATH.exists():
-        logger.info("Building features from raw CSV (takes ~2 min)...")
-        from rocket_classifier.features import build_features
-        raw = pd.read_csv(DATA_PATH)
-        df = build_features(raw)
-        df.to_parquet(FEATURE_CACHE)
-        logger.info("Cached features to %s", FEATURE_CACHE)
-    else:
-        msg = f"Neither {FEATURE_CACHE} nor {DATA_PATH} found. Upload to /content/"
+    if not DATA_PATH.exists():
+        msg = f"{DATA_PATH} not found. Upload train.csv to /content/"
         raise FileNotFoundError(msg)
 
-    feature_cols = [c for c in df.columns if c != "label"]
+    logger.info("Loading data from %s ...", DATA_PATH)
+    df = pd.read_csv(DATA_PATH)
+
+    # Exclude meta-columns; everything else is a feature
+    non_feature = {"label", "group"}
+    feature_cols = [c for c in df.columns if c not in non_feature]
+
     X = df[feature_cols].to_numpy(dtype=np.float32)
     y = df["label"].to_numpy(dtype=int)
-    groups = np.array(df.index.tolist())
+    groups = df["group"].to_numpy()  # trajectory IDs — drives GroupKFold splits
 
     logger.info(
-        "Loaded %d trajectories x %d features | Labels: 0=%d  1=%d  2=%d",
-        *X.shape, (y == 0).sum(), (y == 1).sum(), (y == 2).sum(),
+        "Loaded %d rows x %d features | Labels: 0=%d  1=%d  2=%d | Groups: %d unique",
+        *X.shape, (y == 0).sum(), (y == 1).sum(), (y == 2).sum(), len(np.unique(groups)),
     )
     return X, y, groups, feature_cols
 
