@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
 > **[Live Demo — novikov-rocket-lab.streamlit.app](https://novikov-rocket-lab.streamlit.app/)**
-> Adjust physics sliders and watch the XGBoost model classify trajectories in real time.
+> Adjust physics sliders and watch the LightGBM model classify trajectories in real time.
 
 ![Physics-Informed Feature Visualization](demo.png)
 
@@ -15,7 +15,7 @@
 
 ## What This Is
 
-A production-grade ML pipeline that classifies rocket types from radar-tracked 3D flight trajectories. Given a variable-length sequence of `(x, y, z, time_stamp)` radar observations, the system extracts 76 physics-derived features and predicts the rocket class (0, 1, or 2).
+A production-grade ML pipeline that classifies rocket types from radar-tracked 3D flight trajectories. Given a variable-length sequence of `(x, y, z, time_stamp)` radar observations, the system extracts physics-derived features and predicts the rocket class (0, 1, or 2).
 
 ### The Core Challenge: Worst-Class Recall Under Severe Imbalance
 
@@ -27,16 +27,21 @@ Standard accuracy is the wrong metric here. Class 2 comprises only **7.1% of tra
 
 This metric demands that every design decision — feature engineering, class weighting, objective function, and post-hoc threshold tuning — be oriented toward equalising recall across all classes, deliberately sacrificing majority-class precision where necessary to protect minority-class recall.
 
-**Result:** 5-fold GroupKFold cross-validation min-recall of **0.9984 ± 0.0007** — fewer than 1 in 400 rockets misclassified in the worst-performing class.
+**Result:** 10-fold GroupKFold cross-validation OOB min-recall of **0.9988** — fewer than 1 in 800 rockets misclassified in the worst-performing class.
 
-| Fold | Min-Recall (tuned) |
-|------|--------------------|
-| 1    | 0.9979             |
-| 2    | 0.9981             |
-| 3    | 0.9993             |
-| 4    | 0.9975             |
-| 5    | 0.9991             |
-| **Mean** | **0.9984 ± 0.0007** |
+| Fold | Min-Recall (OOB) |
+|------|-----------------|
+| 1    | 0.9996          |
+| 2    | 0.9987          |
+| 3    | 0.9991          |
+| 4    | 0.9996          |
+| 5    | 0.9988          |
+| 6    | 0.9976          |
+| 7    | 1.0000          |
+| 8    | 0.9959          |
+| 9    | 1.0000          |
+| 10   | 0.9991          |
+| **Mean** | **0.9988** |
 
 ---
 
@@ -44,11 +49,12 @@ This metric demands that every design decision — feature engineering, class we
 
 ### Why XGBoost
 
-The problem is **tabular classification on 76 hand-engineered features** — the exact regime where gradient-boosted trees dominate. XGBoost was chosen over alternatives for specific reasons:
+The problem is **tabular classification on physics-engineered features** — the exact regime where gradient-boosted trees dominate. An exhaustive comparison confirmed LightGBM as the best algorithm:
 
-- **Over neural networks:** With ~32k trajectories and 76 scalar features, a deep model would overfit without extensive regularisation. XGBoost's histogram binning and built-in L1/L2 regularisation handle this natively. There is no sequential/spatial structure in the aggregated features that a CNN or LSTM could exploit (the raw time series is already reduced to summary statistics).
-- **Over Random Forest:** XGBoost's sequential boosting focuses capacity on hard-to-classify trajectories (the ~33 borderline cases between class 0 and 1), whereas Random Forest treats all samples equally. This matters when the metric penalises the worst class.
-- **Over logistic regression / SVM:** The class boundaries in this feature space are non-linear (e.g., class 2 occupies a specific region of the launch_z × v_horiz plane). Tree-based models handle this without manual feature crosses.
+- **Over neural networks (1D-CNN, Transformer):** Empirically tested on H100 GPU — sequence models achieved 0.94-0.96 OOB mean vs LightGBM's 0.9988. With 32k trajectories, neural networks cannot learn what hand-crafted physics features encode for free.
+- **Over XGBoost:** LightGBM with GPU-optimised hyperparameters (depth 12, 2011 trees) outperformed the baseline XGBoost (0.9988 vs 0.9984 OOB mean). LightGBM's leaf-wise growth finds finer decision boundaries on minority class 2.
+- **Over Random Forest:** Sequential boosting focuses capacity on the ~33 hard borderline cases between classes 0 and 1.
+- **Over logistic regression / SVM:** Non-linear class boundaries require tree-based models.
 
 ### Pipeline Overview
 
@@ -59,7 +65,10 @@ Raw radar pings (x, y, z, t)
 Feature Engineering ──► 76 physics features per trajectory
     │
     ▼
-XGBoost (multi:softprob) ──► 3-class probability estimates
+Feature Selection ──► 61 features (backward elimination, -15 noise features)
+    │
+    ▼
+LightGBM (multiclass, softprob) ──► 3-class probability estimates
     │
     ▼
 OOB Threshold Tuning ──► bias-adjusted predictions optimised for min-recall
@@ -68,11 +77,12 @@ OOB Threshold Tuning ──► bias-adjusted predictions optimised for min-recal
 submission.csv
 ```
 
-The pipeline has three stages, each addressing a different challenge:
+The pipeline has four stages, each addressing a different challenge:
 
-1. **Feature engineering** converts variable-length radar sequences into fixed-size vectors that encode the physics of each rocket type.
-2. **XGBoost with softprob** learns the class boundaries and outputs calibrated probabilities rather than hard labels.
-3. **Threshold tuning** post-processes these probabilities with per-class biases to directly optimise the min-recall metric, recovering borderline cases that raw argmax misclassifies.
+1. **Feature engineering** converts variable-length radar sequences into fixed-size vectors encoding the physics of each rocket type.
+2. **Feature selection** drops 15 noise features via importance-ranked backward elimination, improving minority-class recall.
+3. **LightGBM with softprob** learns deep non-linear boundaries and outputs calibrated probabilities.
+4. **Threshold tuning** post-processes probabilities with per-class biases to directly optimise the min-recall metric.
 
 ---
 
@@ -95,17 +105,18 @@ Different rocket families have different propellant charges (muzzle velocity), m
 
 ### Model Configuration
 
-The XGBoost classifier uses `multi:softprob` with 600 histogram-based trees at depth 6:
+The production model is LightGBM, trained via 50-trial GPU-accelerated Optuna search on a Colab H100. Hyperparameters are the result of Bayesian optimisation, not manual tuning:
 
 | Parameter | Value | Rationale |
 |---|---|---|
-| `n_estimators` | 600 | Enough capacity for 76 features; diminishing returns beyond this |
-| `max_depth` | 6 | Deep enough for feature interactions, shallow enough to avoid overfitting 32k samples |
-| `learning_rate` | 0.05 | Conservative shrinkage for stable convergence |
-| `subsample` | 0.8 | Row sampling reduces variance on the minority class |
-| `colsample_bytree` | 0.8 | Feature sampling forces diverse trees |
-| `min_child_weight` | 5 | Prevents splits on tiny leaf groups (important for class 2 with only 2,339 samples) |
-| `objective` | `multi:softprob` | Outputs calibrated probabilities for downstream threshold tuning |
+| `n_estimators` | 2011 | Found by Optuna — more trees than XGBoost default, exploits LightGBM's speed |
+| `max_depth` | 12 | Deeper than XGBoost (6) — LightGBM's leaf-wise growth avoids the overfitting risk of deep level-wise trees |
+| `learning_rate` | 0.082 | Found by Optuna — higher than XGBoost default due to more trees |
+| `subsample` | 0.913 | Row sampling, found by Optuna |
+| `colsample_bytree` | 0.679 | Feature sampling, found by Optuna |
+| `objective` | `multiclass` (softprob) | Calibrated probabilities for downstream threshold tuning |
+
+Threshold biases: `[0.000000, 1.063291, 2.177215]` — aggressively upweights classes 1 and 2 to compensate for the 69%/24%/7% class imbalance.
 
 ### Class Imbalance Strategy
 
