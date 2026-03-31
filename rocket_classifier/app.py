@@ -1,16 +1,15 @@
 """Streamlit interactive demo for rocket trajectory classification.
 
 Generates a synthetic 3D trajectory from physical parameters controlled
-by sidebar sliders, extracts the same 76 physics features used in
-production, and classifies in real time using the trained XGBoost model.
+by sidebar sliders, extracts physics features, and classifies in real time
+using a LightGBM model trained via GPU-accelerated Optuna search on Colab.
+
+Model: LightGBM (61 selected features, 0.9988 OOB min-recall)
+       Trained externally via colab_brute_force_optimization.py.
 
 Model loading strategy (in priority order):
-    1. Local file ``model.pkl`` in the project root (fastest — created by
-       running ``python src/main.py``).
-    2. Remote download from the GitHub Release asset at
-       ``MODEL_RELEASE_URL`` (automatic fallback when no local file exists,
-       e.g. in a fresh clone or cloud deployment).  The download is cached
-       by ``@st.cache_resource`` so it only happens once per session.
+    1. Local ``model.pkl`` in the project root.
+    2. Remote download from the GitHub Release asset (automatic fallback).
 
 Run with:
     streamlit run rocket_classifier/app.py
@@ -18,6 +17,8 @@ Run with:
 
 from __future__ import annotations
 
+import importlib
+import io
 from pathlib import Path
 
 import numpy as np
@@ -25,9 +26,29 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
-from xgboost import XGBClassifier
 
 from rocket_classifier.features import _extract_trajectory_features
+
+# The 61 features selected by automated backward elimination in Colab.
+# Dropping the 15 lowest-importance features improved CV min-recall.
+SELECTED_FEATURES = [
+    "n_points", "total_duration_s", "dt_std", "dt_max", "dt_median",
+    "speed_mean", "speed_std", "speed_min", "speed_max",
+    "vx_mean", "vx_std", "vx_min", "vx_max",
+    "vy_mean", "vy_std", "vy_min", "vy_max",
+    "vz_std", "vz_min", "vz_median",
+    "v_horiz_mean", "v_horiz_std", "v_horiz_min", "v_horiz_median",
+    "initial_speed", "initial_vz", "final_speed", "final_vz",
+    "acc_mag_mean", "acc_mag_std", "acc_mag_min", "acc_mag_max", "acc_mag_median",
+    "az_mean", "az_std", "az_min", "az_max", "az_median",
+    "acc_horiz_mean", "acc_horiz_std", "acc_horiz_min", "acc_horiz_max",
+    "mean_az",
+    "jerk_mag_mean", "jerk_mag_std", "jerk_mag_min", "jerk_mag_max", "jerk_mag_median",
+    "initial_z", "final_z", "delta_z_total", "apogee_relative", "time_to_apogee_s",
+    "x_range", "y_range", "z_range",
+    "max_horiz_range", "final_horiz_range", "path_length_3d",
+    "launch_x", "launch_y",
+]
 
 MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
 MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
@@ -76,34 +97,25 @@ def _download_file(url: str) -> bytes | None:
 
 
 @st.cache_resource
-def load_model() -> XGBClassifier | None:
-    """Load the trained XGBoost classifier using native XGBoost format.
+def load_model() -> object | None:
+    """Load the trained LightGBM classifier via joblib.
 
     Resolution order:
         1. Local ``model.pkl`` in the project root.
         2. Remote download from GitHub Release.
 
     Returns:
-        The XGBClassifier, or ``None`` if neither source is available.
+        The fitted LightGBM Booster, or ``None`` if neither source is available.
     """
-    if MODEL_PATH.exists():
-        model = XGBClassifier()
-        model.load_model(str(MODEL_PATH))
-        return model
+    joblib = importlib.import_module("joblib")
 
-    # Fallback: fetch from GitHub Release and write to temp file for native load
+    if MODEL_PATH.exists():
+        return joblib.load(str(MODEL_PATH))
+
     model_bytes = _download_file(MODEL_RELEASE_URL)
     if model_bytes is None:
         return None
-    # Write to a temp path so XGBoost's native loader can read it
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(suffix=".ubj", delete=False) as f:
-        f.write(model_bytes)
-        tmp_path = f.name
-    model = XGBClassifier()
-    model.load_model(tmp_path)
-    return model
+    return joblib.load(io.BytesIO(model_bytes))
 
 
 @st.cache_resource
@@ -154,13 +166,7 @@ def get_feature_names() -> list[str]:
     Returns:
         Ordered list of 76 feature name strings.
     """
-    rng = np.random.default_rng(0)
-    n = 20
-    t = np.linspace(0, 1, n)
-    pos = rng.random((n, 3))
-    times = pd.to_datetime(t, unit="s", origin="2024-01-01")
-    df = pd.DataFrame({"x": pos[:, 0], "y": pos[:, 1], "z": pos[:, 2], "time_stamp": times})
-    return list(_extract_trajectory_features(df).keys())
+    return SELECTED_FEATURES
 
 
 # ── Trajectory generation ──────────────────────────────────────────────────────
@@ -224,7 +230,7 @@ def generate_trajectory(
 
 
 def classify(
-    model: XGBClassifier,
+    model: object,
     pos: np.ndarray,
     t: np.ndarray,
     feature_names: list[str],
@@ -251,9 +257,11 @@ def classify(
     times = pd.to_datetime(t, unit="s", origin="2024-01-01")
     df = pd.DataFrame({"x": pos[:, 0], "y": pos[:, 1], "z": pos[:, 2], "time_stamp": times})
     feats = _extract_trajectory_features(df)
+
+    # Use only the 61 selected features (feature_names == SELECTED_FEATURES)
     vec = np.array([feats.get(k, 0.0) for k in feature_names], dtype=np.float32)
 
-    # Fill NaN with train medians to match training imputation (prevent train-serve skew)
+    # Fill NaN with train medians (61 values, matching selected features)
     nan_mask = np.isnan(vec)
     if nan_mask.any() and train_medians is not None:
         vec[nan_mask] = train_medians[nan_mask]
@@ -262,7 +270,8 @@ def classify(
 
     X = vec.reshape(1, -1)
 
-    proba = model.predict_proba(X)[0]
+    # LightGBM Booster.predict() returns probabilities directly
+    proba = model.predict(X)[0]
     biases = load_threshold_biases()
     if biases is not None:
         adjusted = np.log(proba + 1e-12) + biases

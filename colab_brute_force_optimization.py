@@ -14,7 +14,7 @@ Run in Google Colab with T4 GPU. Install dependencies first:
 
     !pip install -q optuna catboost lightgbm xgboost scikit-learn pandas numpy
 
-Upload `train.csv` to /content/ before running.
+Upload `cache_train_features.parquet` to /content/ before running.
 
 Usage:
     %run colab_brute_force_optimization.py
@@ -43,11 +43,21 @@ from xgboost import XGBClassifier
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(message)s",
+# Force-reconfigure logging so it works correctly in Jupyter/Colab,
+# where basicConfig() is a no-op if any handler was already attached
+# (e.g. by a library or a previous cell run).
+_fmt = logging.Formatter(
+    fmt="%(asctime)s | %(levelname)-7s | %(message)s",
     datefmt="%H:%M:%S",
 )
+_handler = logging.StreamHandler()
+_handler.setFormatter(_fmt)
+
+root_logger = logging.getLogger()
+root_logger.handlers.clear()
+root_logger.addHandler(_handler)
+root_logger.setLevel(logging.INFO)
+
 logger = logging.getLogger("rocket-optuna")
 
 # ---------------------------------------------------------------------------
@@ -62,7 +72,7 @@ THRESHOLD_GRID_COARSE = 80
 THRESHOLD_GRID_FINE = 50
 THRESHOLD_GRID_ULTRA = 30
 
-DATA_PATH = Path("/content/train.csv")
+DATA_PATH = Path("/content/cache_train_features.parquet")
 MODEL_OUTPUT = Path("/content/ultimate_rocket_model")
 RESULTS_OUTPUT = Path("/content/optimization_results.json")
 
@@ -140,33 +150,40 @@ def optimize_thresholds(y_true: np.ndarray, proba: np.ndarray) -> tuple[np.ndarr
 # ---------------------------------------------------------------------------
 
 def load_data() -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """Load feature matrix, labels, and group IDs directly from train.csv.
+    """Load pre-calculated features from cache_train_features.parquet.
 
-    Expects train.csv to contain:
-      - 76 continuous feature columns
+    The parquet file must contain:
+      - 76 pre-calculated continuous feature columns
       - 'label'  (int: 0, 1, 2) — target
       - 'group'  (int)          — trajectory ID for GroupKFold
 
-    Both 'label' and 'group' are excluded from the feature matrix X.
-    Groups are read from the 'group' column — NOT from the DataFrame index —
-    to prevent data leakage in GroupKFold.
+    Feature columns are identified dynamically — any column that is not
+    'label' or 'group'. Both meta-columns are excluded from X.
+    Groups are read from the 'group' column, not the index.
 
     Returns (X, y, groups, feature_names).
     """
     if not DATA_PATH.exists():
-        msg = f"{DATA_PATH} not found. Upload train.csv to /content/"
+        msg = f"{DATA_PATH} not found. Upload cache_train_features.parquet to /content/"
         raise FileNotFoundError(msg)
 
     logger.info("Loading data from %s ...", DATA_PATH)
-    df = pd.read_csv(DATA_PATH)
+    df = pd.read_parquet(DATA_PATH)
 
-    # Exclude meta-columns; everything else is a feature
-    non_feature = {"label", "group"}
+    # Trajectory IDs for GroupKFold: prefer an explicit 'group' column;
+    # fall back to the DataFrame index (traj_ind) if no such column exists.
+    if "group" in df.columns:
+        groups = df["group"].to_numpy()
+        non_feature = {"label", "group"}
+    else:
+        groups = df.index.to_numpy()
+        non_feature = {"label"}
+        logger.info("No 'group' column found — using DataFrame index as group IDs.")
+
     feature_cols = [c for c in df.columns if c not in non_feature]
 
     X = df[feature_cols].to_numpy(dtype=np.float32)
     y = df["label"].to_numpy(dtype=int)
-    groups = df["group"].to_numpy()  # trajectory IDs — drives GroupKFold splits
 
     logger.info(
         "Loaded %d rows x %d features | Labels: 0=%d  1=%d  2=%d | Groups: %d unique",
@@ -202,7 +219,8 @@ def _cv_score_with_features(
             n_estimators=400, max_depth=6, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
             objective="multiclass", num_class=N_CLASSES,
-            random_state=RANDOM_STATE, verbose=-1, n_jobs=-1,
+            device="gpu", gpu_use_dp=False,
+            random_state=RANDOM_STATE, verbose=-1,
         )
         m.fit(Xtr, ytr, sample_weight=sw)
         oob_proba[val_idx] = m.predict_proba(Xv)
@@ -245,7 +263,8 @@ def run_feature_selection(
         n_estimators=600, max_depth=6, learning_rate=0.05,
         subsample=0.8, colsample_bytree=0.8,
         objective="multiclass", num_class=N_CLASSES,
-        random_state=RANDOM_STATE, verbose=-1, n_jobs=-1,
+        device="gpu", gpu_use_dp=False,
+        random_state=RANDOM_STATE, verbose=-1,
     )
     m.fit(X_imp, y, sample_weight=sw)
     importances = m.feature_importances_
@@ -332,6 +351,7 @@ def build_model(algo: str, params: dict) -> object:
         return CatBoostClassifier(
             iterations=n_est, depth=depth, learning_rate=lr,
             subsample=sub, l2_leaf_reg=rl, random_strength=ra,
+            bootstrap_type="Bernoulli",  # required to use subsample on GPU
             loss_function="MultiClass", classes_count=N_CLASSES,
             task_type="GPU", random_seed=RANDOM_STATE, verbose=0,
         )
@@ -476,12 +496,22 @@ def main() -> None:
     t0 = time.time()
     X_all, y, groups, all_feature_names = load_data()
 
-    # ── STAGE 1: Feature Selection ────────────────────────────────────────
-    feature_mask, selected_features = run_feature_selection(
-        X_all, y, groups, all_feature_names,
-    )
+    # ── STAGE 1: Feature Selection (pre-computed from previous run) ──────
+    # Dropped: dt_min, dt_mean, v_horiz_max, acc_horiz_median, vx_median,
+    #          initial_v_horiz, vz_max, speed_median, launch_angle_elev,
+    #          vy_median, apogee_z, apogee_time_frac, vz_mean,
+    #          launch_angle_azimuth, launch_z
+    _DROPPED = {
+        "dt_min", "dt_mean", "v_horiz_max", "acc_horiz_median", "vx_median",
+        "initial_v_horiz", "vz_max", "speed_median", "launch_angle_elev",
+        "vy_median", "apogee_z", "apogee_time_frac", "vz_mean",
+        "launch_angle_azimuth", "launch_z",
+    }
+    selected_features = [f for f in all_feature_names if f not in _DROPPED]
+    feature_mask = np.array([f not in _DROPPED for f in all_feature_names])
     X = X_all[:, feature_mask]
-    logger.info("Proceeding with %d / %d features", X.shape[1], X_all.shape[1])
+    logger.info("Stage 1 skipped — using %d / %d pre-selected features",
+                len(selected_features), len(all_feature_names))
 
     # ── STAGE 2: Optuna Search ────────────────────────────────────────────
     logger.info("")
