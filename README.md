@@ -47,7 +47,7 @@ This metric demands that every design decision — feature engineering, class we
 
 ## Solution Design
 
-### Why XGBoost
+### Why LightGBM
 
 The problem is **tabular classification on physics-engineered features** — the exact regime where gradient-boosted trees dominate. An exhaustive comparison confirmed LightGBM as the best algorithm:
 
@@ -90,7 +90,7 @@ The pipeline has four stages, each addressing a different challenge:
 
 ### Feature Engineering
 
-Raw radar pings are aggregated into **76 scalar features** per trajectory via finite-difference kinematics:
+Raw radar pings are aggregated into **76 scalar features** per trajectory via finite-difference kinematics (61 are used in production after automated feature selection):
 
 - **Velocity, Acceleration, Jerk** (45 features) — 3D derivatives with midpoint-averaged time deltas. Jerk magnitude distinguishes propelled rockets (sharp ignition spike) from passive objects.
 - **Launch Angle** (2 features) — elevation and azimuth of the initial velocity vector via `atan2`. Invariant to launch position.
@@ -120,11 +120,11 @@ Threshold biases: `[0.000000, 1.063291, 2.177215]` — aggressively upweights cl
 
 ### Class Imbalance Strategy
 
-Inverse-frequency sample weights (`w_i = N / (K * N_j)`) passed to XGBoost. Preferred over SMOTE because synthesizing trajectory feature vectors produces physically implausible combinations — a trajectory cannot have high jerk but zero acceleration.
+Inverse-frequency sample weights (`w_i = N / (K * N_j)`) passed to LightGBM. Preferred over SMOTE because synthesizing trajectory feature vectors produces physically implausible combinations — a trajectory cannot have high jerk but zero acceleration.
 
 ### Threshold Tuning
 
-The model uses `multi:softprob` to output calibrated per-class probabilities instead of hard predictions. Per-class log-probability biases are then optimised on out-of-bag (OOB) predictions from cross-validation to maximise the min-recall metric. This shifts decision boundaries toward minority classes without retraining, improving CV min-recall from 0.9966 to 0.9984.
+LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on out-of-bag (OOB) predictions from 10-fold CV to maximise the min-recall metric. This shifts decision boundaries toward minority classes without retraining, improving OOB min-recall from the XGBoost baseline (0.9966) to **0.9988**.
 
 ### Data Leakage Prevention
 
@@ -140,7 +140,7 @@ Three layers:
 | Layer | Technology | Why |
 |---|---|---|
 | **Runtime** | Python 3.12 | PEP 709 comprehension inlining, improved error messages |
-| **ML** | XGBoost 2.x, scikit-learn | Histogram-based gradient boosting, GroupKFold |
+| **ML** | LightGBM 4.x, scikit-learn | Leaf-wise gradient boosting, GPU-accelerated Optuna search, GroupKFold |
 | **Validation** | Pydantic v2 | Schema enforcement on raw radar data before feature engineering |
 | **Explainability** | SHAP TreeExplainer | Exact Shapley values in O(TLD) time |
 | **Demo** | Streamlit, Plotly | Real-time 3D trajectory visualization |
@@ -210,7 +210,7 @@ The Dockerfile uses `COPY --from=ghcr.io/astral-sh/uv:latest` for a single-binar
 rocket_classifier/          # Installable Python package
 ├── __init__.py
 ├── features.py             # 76 physics-derived features (velocity, jerk, apogee, ...)
-├── model.py                # XGBoost + GroupKFold CV + per-fold imputation + threshold tuning
+├── model.py                # XGBoost training pipeline (local) — production uses Colab-trained LightGBM
 ├── schema.py               # Pydantic v2 data contracts (TrajectoryPoint)
 ├── main.py                 # Pipeline orchestrator: load → validate → train → predict
 ├── app.py                  # Streamlit interactive demo
