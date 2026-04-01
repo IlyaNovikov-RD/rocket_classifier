@@ -10,3 +10,6 @@ model.pkl
 train_medians.npy
 threshold_biases.npy
 submission.csv
+
+# Downloaded Colab artifacts
+colab_brute_force_results/
