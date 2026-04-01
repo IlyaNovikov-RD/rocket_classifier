@@ -27,7 +27,7 @@ Standard accuracy is the wrong metric here. Class 2 comprises only **7.1% of tra
 
 This metric demands that every design decision — feature engineering, class weighting, objective function, and post-hoc threshold tuning — be oriented toward equalising recall across all classes, deliberately sacrificing majority-class precision where necessary to protect minority-class recall.
 
-**Result:** 10-fold GroupKFold cross-validation OOB min-recall of **0.9988** — fewer than 1 in 800 rockets misclassified in the worst-performing class.
+**Result:** Global OOB min-recall of **0.9995** after threshold tuning — fewer than 1 in 2,000 rockets misclassified in the worst-performing class.
 
 | Fold | Min-Recall (OOB) |
 |------|-----------------|
@@ -41,7 +41,7 @@ This metric demands that every design decision — feature engineering, class we
 | 8    | 0.9959          |
 | 9    | 1.0000          |
 | 10   | 0.9991          |
-| **Mean** | **0.9988** |
+| **Global OOB (tuned)** | **0.9995** |
 
 ---
 
@@ -124,7 +124,7 @@ Inverse-frequency sample weights (`w_i = N / (K * N_j)`) passed to LightGBM. Pre
 
 ### Threshold Tuning
 
-LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on out-of-bag (OOB) predictions from 10-fold CV to maximise the min-recall metric. This shifts decision boundaries toward minority classes without retraining, improving OOB min-recall from the XGBoost baseline (0.9966) to **0.9988**.
+LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on all out-of-bag (OOB) predictions simultaneously from 10-fold CV to maximise the min-recall metric. This shifts decision boundaries toward minority classes without retraining, improving the global OOB min-recall from the XGBoost baseline (0.9966) to **0.9995**.
 
 ### Data Leakage Prevention
 
