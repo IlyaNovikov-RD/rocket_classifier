@@ -7,7 +7,7 @@ observation, and :func:`validate_dataframe`, a helper that bulk-validates a
 Typical usage::
 
     import pandas as pd
-    from src.schema import validate_dataframe
+    from rocket_classifier.schema import validate_dataframe
 
     df = pd.read_csv("data/train.csv")
     valid_records, errors = validate_dataframe(df, has_label=True)
