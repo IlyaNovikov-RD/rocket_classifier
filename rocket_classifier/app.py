@@ -4,7 +4,7 @@ Generates a synthetic 3D trajectory from physical parameters controlled
 by sidebar sliders, extracts physics features, and classifies in real time
 using a LightGBM model trained via GPU-accelerated Optuna search on Colab.
 
-Model: LightGBM (61 selected features, 0.9988 OOB min-recall)
+Model: LightGBM (61 selected features, 0.9995 OOB min-recall)
        Trained externally via colab_brute_force_optimization.py.
 
 Model loading strategy (in priority order):
@@ -448,8 +448,8 @@ def main() -> None:
         if model is None:
             st.error(
                 "**model.pkl not found.**\n\n"
-                "Train the model first:\n"
-                "```\nuv run python src/main.py\n```"
+                "Download the model first:\n"
+                "```\nmake download-weights\n```"
             )
         else:
             st.success("✓ Model loaded")

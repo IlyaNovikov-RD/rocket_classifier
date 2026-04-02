@@ -1,5 +1,5 @@
 """
-Comprehensive unit tests for src/features.py.
+Comprehensive unit tests for rocket_classifier/features.py.
 
 Coverage targets:
 - _compute_derivatives: shapes, known physics values, boundary point counts, dt=0
