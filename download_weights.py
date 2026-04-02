@@ -42,6 +42,12 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 
 def main(include_caches: bool = False) -> None:
+    """Download model artifacts from GitHub Release into weights/ and cache/.
+
+    Args:
+        include_caches: If True, also downloads parquet feature caches (~15 MB).
+            Required for ``make run`` when data/ is not available locally.
+    """
     targets = ARTIFACTS + (CACHE_ARTIFACTS if include_caches else [])
     for name in targets:
         dest = (CACHE_DIR if name.endswith(".parquet") else WEIGHTS_DIR) / name

@@ -112,8 +112,6 @@ def load_train_medians() -> np.ndarray | None:
     medians_bytes = _download_file(MEDIANS_RELEASE_URL)
     if medians_bytes is None:
         return None
-    import io
-
     return np.load(io.BytesIO(medians_bytes))
 
 
@@ -130,22 +128,16 @@ def load_threshold_biases() -> np.ndarray | None:
     biases_bytes = _download_file(BIASES_RELEASE_URL)
     if biases_bytes is None:
         return None
-    import io
-
     return np.load(io.BytesIO(biases_bytes))
 
 
 @st.cache_data
 def get_feature_names() -> list[str]:
-    """Derive the canonical 76-feature order by calling the production extractor.
-
-    Generates a minimal dummy trajectory, calls ``_extract_trajectory_features``
-    once, and returns the dict keys in insertion order.  Because Python 3.7+
-    preserves dict insertion order, this is deterministic and matches the column
-    order used during model training.
+    """Return the 61 production feature names in the order the model expects.
 
     Returns:
-        Ordered list of 76 feature name strings.
+        Ordered list of 61 feature name strings (subset of the 76 engineered
+        features, selected via automated backward elimination in research/).
     """
     return SELECTED_FEATURES
 
@@ -223,12 +215,12 @@ def classify(
     code path is used as during training.
 
     Args:
-        model: Fitted XGBClassifier.
+        model: Fitted LightGBM model (loaded via RocketClassifier).
         pos: Position array of shape (n, 3).
         t: Time array of shape (n,) in seconds.
-        feature_names: Ordered list of 76 feature names matching training order.
-        train_medians: Per-feature median array from training. Used to fill
-            NaN values consistently with training. Falls back to 0.0 if None.
+        feature_names: Ordered list of 61 production feature names.
+        train_medians: Per-feature median array (61 values) for NaN imputation.
+            Falls back to 0.0 if None.
 
     Returns:
         A tuple of:
@@ -497,8 +489,8 @@ def main() -> None:
     st.markdown("# Rocket Trajectory Classifier — Live Demo")
     st.markdown(
         "Drag the sidebar sliders to modify the synthetic trajectory. "
-        "The XGBoost model re-classifies on every change using the same "
-        "76-feature physics pipeline as production."
+        "The LightGBM model re-classifies on every change using the same "
+        "61-feature physics pipeline as production."
     )
 
     # ── Metric cards ───────────────────────────────────────────────────────────
