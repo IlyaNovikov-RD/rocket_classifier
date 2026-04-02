@@ -25,12 +25,10 @@ cache/
 
 # ── Model artifacts (served from GitHub Release v1.0.0) ──────────────────────
 # Download with: make download-weights
-model.pkl
-train_medians.npy
-threshold_biases.npy
+weights/
 
 # ── Pipeline outputs ──────────────────────────────────────────────────────────
-submission.csv
+outputs/
 
 # ── Local experiment artifacts ────────────────────────────────────────────────
 colab_brute_force_results/

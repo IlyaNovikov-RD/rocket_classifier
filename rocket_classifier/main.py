@@ -28,13 +28,20 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path(__file__).parent.parent / "data"
-OUTPUT_PATH = Path(__file__).parent.parent / "submission.csv"
-MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
-MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
-BIASES_PATH = Path(__file__).parent.parent / "threshold_biases.npy"
-CACHE_DIR = Path(__file__).parent.parent / "cache"
+_ROOT = Path(__file__).parent.parent
+DATA_DIR = _ROOT / "data"
+WEIGHTS_DIR = _ROOT / "weights"
+CACHE_DIR = _ROOT / "cache"
+OUTPUTS_DIR = _ROOT / "outputs"
+
+# Ensure runtime directories exist
 CACHE_DIR.mkdir(exist_ok=True)
+OUTPUTS_DIR.mkdir(exist_ok=True)
+
+OUTPUT_PATH = OUTPUTS_DIR / "submission.csv"
+MODEL_PATH = WEIGHTS_DIR / "model.pkl"
+MEDIANS_PATH = WEIGHTS_DIR / "train_medians.npy"
+BIASES_PATH = WEIGHTS_DIR / "threshold_biases.npy"
 FEATURE_CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
 FEATURE_CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
 
