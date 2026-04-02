@@ -76,9 +76,6 @@ numpy==2.4.3
     #   scipy
     #   shap
     #   streamlit
-    #   xgboost
-nvidia-nccl-cu12==2.29.7 ; sys_platform == 'linux'
-    # via xgboost
 packaging==26.0
     # via
     #   altair
@@ -138,7 +135,6 @@ scipy==1.17.1
     #   lightgbm
     #   scikit-learn
     #   shap
-    #   xgboost
 shap==0.50.0
     # via rocket-classifier
 six==1.17.0
@@ -176,5 +172,3 @@ urllib3==2.6.3
     # via requests
 watchdog==6.0.0 ; sys_platform != 'darwin'
     # via streamlit
-xgboost==3.2.0
-    # via rocket-classifier

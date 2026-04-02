@@ -33,11 +33,6 @@ DATA_DIR = _ROOT / "data"
 WEIGHTS_DIR = _ROOT / "weights"
 CACHE_DIR = _ROOT / "cache"
 OUTPUTS_DIR = _ROOT / "outputs"
-
-# Ensure runtime directories exist
-CACHE_DIR.mkdir(exist_ok=True)
-OUTPUTS_DIR.mkdir(exist_ok=True)
-
 OUTPUT_PATH = OUTPUTS_DIR / "submission.csv"
 MODEL_PATH = WEIGHTS_DIR / "model.pkl"
 MEDIANS_PATH = WEIGHTS_DIR / "train_medians.npy"
@@ -94,6 +89,8 @@ def main() -> None:
         6. Export ``submission.csv``.
     """
     t_start = time.time()
+    CACHE_DIR.mkdir(exist_ok=True)
+    OUTPUTS_DIR.mkdir(exist_ok=True)
 
     # --- Step 1: Load ---
     train_raw, test_raw, sample_sub = load_data()

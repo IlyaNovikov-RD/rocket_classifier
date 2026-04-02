@@ -20,7 +20,6 @@ import logging
 import textwrap
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import matplotlib
 
@@ -32,9 +31,6 @@ import shap
 
 from rocket_classifier.features import build_features
 from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
-
-if TYPE_CHECKING:
-    pass  # XGBClassifier no longer needed — using LightGBM via RocketClassifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
