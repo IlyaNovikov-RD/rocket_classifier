@@ -8,7 +8,7 @@ Model: LightGBM (61 selected features, 0.9995 OOB min-recall)
        Trained externally via colab_brute_force_optimization.py.
 
 Model loading strategy (in priority order):
-    1. Local ``model.pkl`` in the project root.
+    1. Local artifacts in weights/ (ONNX → native LightGBM → pkl).
     2. Remote download from the GitHub Release asset (automatic fallback).
 
 Run with:
@@ -17,10 +17,8 @@ Run with:
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -28,19 +26,24 @@ import requests
 import streamlit as st
 
 from rocket_classifier.features import _extract_trajectory_features
-from rocket_classifier.model import SELECTED_FEATURES
+from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
 
 _WEIGHTS = Path(__file__).parent.parent / "weights"
-MODEL_PATH = _WEIGHTS / "model.pkl"
+MODEL_PATH = _WEIGHTS / "model.pkl"  # base path — from_artifacts resolves .onnx/.lgb/.pkl
 MEDIANS_PATH = _WEIGHTS / "train_medians.npy"
 BIASES_PATH = _WEIGHTS / "threshold_biases.npy"
 _RELEASE_BASE = (
     "https://github.com/IlyaNovikov-RD/rocket_classifier"
     "/releases/latest/download"
 )
-MODEL_RELEASE_URL = f"{_RELEASE_BASE}/model.pkl"
-MEDIANS_RELEASE_URL = f"{_RELEASE_BASE}/train_medians.npy"
-BIASES_RELEASE_URL = f"{_RELEASE_BASE}/threshold_biases.npy"
+# All backends in the order RocketClassifier.from_artifacts() tries them.
+_RELEASE_ARTIFACTS: dict[Path, str] = {
+    _WEIGHTS / "model.onnx": f"{_RELEASE_BASE}/model.onnx",
+    _WEIGHTS / "model.lgb": f"{_RELEASE_BASE}/model.lgb",
+    MODEL_PATH: f"{_RELEASE_BASE}/model.pkl",
+    MEDIANS_PATH: f"{_RELEASE_BASE}/train_medians.npy",
+    BIASES_PATH: f"{_RELEASE_BASE}/threshold_biases.npy",
+}
 
 # ── Display constants ──────────────────────────────────────────────────────────
 CLASS_NAMES = {0: "Class 0", 1: "Class 1", 2: "Class 2"}
@@ -56,72 +59,50 @@ BLUE = "#58a6ff"
 # ── Model + feature loading ────────────────────────────────────────────────────
 
 
-@st.cache_resource
-def _download_file(url: str) -> bytes | None:
-    """Download a binary file from a URL, returning raw bytes or None on failure."""
+def _ensure_artifact(path: Path, url: str) -> bool:
+    """Download artifact from url to path if not already present.
+
+    Returns True if the file is available (existed or downloaded successfully),
+    False if the download failed.
+    """
+    if path.exists():
+        return True
     try:
         response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()
-        chunks = []
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                chunks.append(chunk)
-        return b"".join(chunks)
+        with path.open("wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        return True
     except requests.RequestException as exc:
-        st.warning(f"Could not download from {url}: {exc}")
-        return None
+        st.warning(f"Could not download {path.name}: {exc}")
+        return False
 
 
 @st.cache_resource
-def load_model() -> object | None:
-    """Load the trained LightGBM classifier via joblib.
+def load_classifier() -> RocketClassifier | None:
+    """Load the RocketClassifier, downloading artifacts from GitHub Release if needed.
 
-    Resolution order:
-        1. Local ``model.pkl`` in the project root.
-        2. Remote download from GitHub Release.
-
-    Returns:
-        The fitted LightGBM Booster, or ``None`` if neither source is available.
-    """
-    if MODEL_PATH.exists():
-        return joblib.load(str(MODEL_PATH))
-
-    model_bytes = _download_file(MODEL_RELEASE_URL)
-    if model_bytes is None:
-        return None
-    return joblib.load(io.BytesIO(model_bytes))
-
-
-@st.cache_resource
-def load_train_medians() -> np.ndarray | None:
-    """Load per-feature training medians for consistent NaN imputation.
+    Downloads all backends (ONNX, native LightGBM, pkl) so
+    ``RocketClassifier.from_artifacts`` picks the fastest available one:
+    ONNX → native LightGBM → pkl.
 
     Returns:
-        NumPy array of per-column medians, or ``None`` if unavailable.
+        A ready-to-use ``RocketClassifier``, or ``None`` if artifacts are unavailable.
     """
-    if MEDIANS_PATH.exists():
-        return np.load(MEDIANS_PATH)
+    _WEIGHTS.mkdir(exist_ok=True)
+    for path, url in _RELEASE_ARTIFACTS.items():
+        _ensure_artifact(path, url)
 
-    medians_bytes = _download_file(MEDIANS_RELEASE_URL)
-    if medians_bytes is None:
+    if not MODEL_PATH.exists():
         return None
-    return np.load(io.BytesIO(medians_bytes))
 
-
-@st.cache_resource
-def load_threshold_biases() -> np.ndarray | None:
-    """Load per-class log-probability biases for threshold-tuned prediction.
-
-    Returns:
-        NumPy array of shape (3,), or ``None`` if unavailable.
-    """
-    if BIASES_PATH.exists():
-        return np.load(BIASES_PATH)
-
-    biases_bytes = _download_file(BIASES_RELEASE_URL)
-    if biases_bytes is None:
-        return None
-    return np.load(io.BytesIO(biases_bytes))
+    return RocketClassifier.from_artifacts(
+        model_path=MODEL_PATH,
+        medians_path=MEDIANS_PATH,
+        biases_path=BIASES_PATH if BIASES_PATH.exists() else None,
+    )
 
 
 @st.cache_data
@@ -196,24 +177,20 @@ def generate_trajectory(
 
 
 def classify(
-    model: object,
+    clf: RocketClassifier,
     pos: np.ndarray,
     t: np.ndarray,
-    feature_names: list[str],
-    train_medians: np.ndarray | None = None,
 ) -> tuple[int, np.ndarray]:
     """Extract production features from a trajectory and classify it.
 
     Delegates to ``_extract_trajectory_features`` so the exact same physics
-    code path is used as during training.
+    code path is used as during training. NaN imputation and bias-adjusted
+    prediction are handled internally by ``RocketClassifier``.
 
     Args:
-        model: Fitted LightGBM model (loaded via RocketClassifier).
+        clf: Loaded ``RocketClassifier`` instance.
         pos: Position array of shape (n, 3).
         t: Time array of shape (n,) in seconds.
-        feature_names: Ordered list of 61 production feature names.
-        train_medians: Per-feature median array (61 values) for NaN imputation.
-            Falls back to 0.0 if None.
 
     Returns:
         A tuple of:
@@ -224,26 +201,13 @@ def classify(
     df = pd.DataFrame({"x": pos[:, 0], "y": pos[:, 1], "z": pos[:, 2], "time_stamp": times})
     feats = _extract_trajectory_features(df)
 
-    # Use only the 61 selected features (feature_names == SELECTED_FEATURES)
-    vec = np.array([feats.get(k, 0.0) for k in feature_names], dtype=np.float32)
-
-    # Fill NaN with train medians (61 values, matching selected features)
-    nan_mask = np.isnan(vec)
-    if nan_mask.any() and train_medians is not None:
-        vec[nan_mask] = train_medians[nan_mask]
-    else:
-        vec = np.nan_to_num(vec, nan=0.0)
-
+    # Build the 61-feature vector in SELECTED_FEATURES order; missing → NaN
+    # so RocketClassifier._select_and_impute fills them with training medians.
+    vec = np.array([feats.get(k, np.nan) for k in SELECTED_FEATURES], dtype=np.float32)
     X = vec.reshape(1, -1)
 
-    # LightGBM Booster.predict() returns probabilities directly
-    proba = model.predict(X)[0]
-    biases = load_threshold_biases()
-    if biases is not None:
-        adjusted = np.log(proba + 1e-12) + biases
-        class_idx = int(np.argmax(adjusted))
-    else:
-        class_idx = int(np.argmax(proba))
+    class_idx = int(clf.predict(X)[0])
+    proba = clf.predict_proba(X)[0]
     return class_idx, proba
 
 
@@ -399,8 +363,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    model = load_model()
-    train_medians = load_train_medians()
+    clf = load_classifier()
     feature_names = get_feature_names()
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
@@ -445,7 +408,7 @@ def main() -> None:
         )
 
         st.markdown("---")
-        if model is None:
+        if clf is None:
             st.error(
                 "**model.pkl not found.**\n\n"
                 "Download the model first:\n"
@@ -458,8 +421,8 @@ def main() -> None:
     # ── Compute ────────────────────────────────────────────────────────────────
     pos, t = generate_trajectory(initial_speed, thrust_accel, noise_sigma)
 
-    if model is not None:
-        class_idx, proba = classify(model, pos, t, feature_names, train_medians)
+    if clf is not None:
+        class_idx, proba = classify(clf, pos, t)
         confidence = float(proba[class_idx])
     else:
         class_idx = 0

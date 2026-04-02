@@ -39,9 +39,6 @@ MEDIANS_PATH = WEIGHTS_DIR / "train_medians.npy"
 BIASES_PATH = WEIGHTS_DIR / "threshold_biases.npy"
 FEATURE_CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
 FEATURE_CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
-# Feather (Arrow IPC) is ~2x faster to read than Parquet for columnar data.
-# Written alongside Parquet on first build; used automatically when present.
-FEATURE_CACHE_TEST_FEATHER = CACHE_DIR / "cache_test_features.feather"
 
 
 # ---------------------------------------------------------------------------
@@ -66,26 +63,29 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.DataFrame:
     """Return per-trajectory feature matrix, loading from cache if available.
 
-    Prefers the Feather (Arrow IPC) sidecar file when present — ~2x faster
-    than Parquet for columnar reads. Falls back to Parquet, then rebuilds
-    from raw data if neither cache exists.
+    Storage strategy follows the Apache Arrow recommendation:
+    - Parquet  (.parquet) — canonical format for storage and download.
+      Compressed, portable, used as the GitHub Release artifact.
+    - Feather  (.feather) — Arrow IPC for fast repeated local reads.
+      Written eagerly alongside Parquet at cache-build time so it is
+      always ready; never written lazily during a pipeline run.
     """
+    import pyarrow.feather as pa_feather
+
     feather_path = cache_path.with_suffix(".feather")
+
     if feather_path.exists():
         logger.info("Loading %s features from Feather cache: %s", name, feather_path)
-        import pyarrow.feather as feather
-        return feather.read_table(str(feather_path)).to_pandas()
+        return pa_feather.read_table(str(feather_path), memory_map=True).to_pandas()
+
     if cache_path.exists():
         logger.info("Loading %s features from Parquet cache: %s", name, cache_path)
         df_feats = pd.read_parquet(cache_path)
-        # Write Feather sidecar for faster future reads
-        try:
-            import pyarrow.feather as feather
-            feather.write_feather(df_feats, str(feather_path), compression="lz4")
-            logger.info("Wrote Feather sidecar: %s", feather_path)
-        except Exception:
-            pass
+        # Eagerly write Feather sidecar so all future reads are fast.
+        pa_feather.write_feather(df_feats, str(feather_path), compression="lz4")
+        logger.info("Wrote Feather sidecar: %s", feather_path)
         return df_feats
+
     if df is None:
         raise FileNotFoundError(
             f"Cache not found at {cache_path} and no raw data provided. "
@@ -96,6 +96,8 @@ def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.Dat
     feats = build_features(df)
     logger.info("%s features done in %.1fs. Shape: %s", name, time.time() - t0, feats.shape)
     feats.to_parquet(cache_path)
+    pa_feather.write_feather(feats, str(feather_path), compression="lz4")
+    logger.info("Wrote Feather sidecar: %s", feather_path)
     return feats
 
 
@@ -109,7 +111,7 @@ def main() -> None:
     Stages:
         1. Load raw CSV data (skipped for train if both caches exist).
         2. Validate training data against the Pydantic schema (skipped if cache exists).
-        3. Engineer per-trajectory features (with Parquet caching).
+        3. Engineer per-trajectory features (Feather for speed, Parquet for portability).
         4. Load the pre-trained LightGBM classifier.
         5. Generate predictions for the test set.
         6. Export ``submission.csv``.
@@ -118,7 +120,10 @@ def main() -> None:
     CACHE_DIR.mkdir(exist_ok=True)
     OUTPUTS_DIR.mkdir(exist_ok=True)
 
-    both_caches_exist = FEATURE_CACHE_TRAIN.exists() and FEATURE_CACHE_TEST.exists()
+    both_caches_exist = (
+        (FEATURE_CACHE_TRAIN.exists() or FEATURE_CACHE_TRAIN.with_suffix(".feather").exists())
+        and (FEATURE_CACHE_TEST.exists() or FEATURE_CACHE_TEST.with_suffix(".feather").exists())
+    )
 
     # --- Step 1: Load ---
     # When both feature caches are present, skip loading train.csv entirely —
@@ -141,7 +146,11 @@ def main() -> None:
             )
 
     # --- Step 3: Feature Engineering ---
-    train_feats = get_features(train_raw, FEATURE_CACHE_TRAIN, "train")
+    # train_feats is only needed when rebuilding caches (label distribution
+    # logging). Skip loading it entirely in the fast path — inference only
+    # touches test_feats. train_medians.npy handles NaN imputation.
+    if not both_caches_exist:
+        train_feats = get_features(train_raw, FEATURE_CACHE_TRAIN, "train")
     test_feats = get_features(test_raw, FEATURE_CACHE_TEST, "test")
 
     # --- Step 4: Load classifier ---
@@ -161,8 +170,8 @@ def main() -> None:
     # Select the 61 production features from the 76-column matrix
     X_test = test_feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32)
 
-    # Log label distribution from training data (for reference)
-    if "label" in train_feats.columns:
+    # Log label distribution only when train features were loaded (cache rebuild path)
+    if not both_caches_exist and "label" in train_feats.columns:
         y_train = train_feats["label"].to_numpy(dtype=int)
         logger.info(
             "Label distribution — 0: %d, 1: %d, 2: %d",
