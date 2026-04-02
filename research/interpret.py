@@ -41,8 +41,9 @@ logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parent.parent
 DATA_DIR = ROOT / "data"
-CACHE_TRAIN = ROOT / "cache_train_features.parquet"
-CACHE_TEST = ROOT / "cache_test_features.parquet"
+CACHE_DIR = ROOT / "cache"
+CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
+CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
 SHAP_PLOT_PATH = ROOT / "assets" / "shap_summary.png"
 REPORT_PATH = ROOT / "assets" / "interpretation_report.txt"
 

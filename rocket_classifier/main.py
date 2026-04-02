@@ -33,8 +33,10 @@ OUTPUT_PATH = Path(__file__).parent.parent / "submission.csv"
 MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
 MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
 BIASES_PATH = Path(__file__).parent.parent / "threshold_biases.npy"
-FEATURE_CACHE_TRAIN = Path(__file__).parent.parent / "cache_train_features.parquet"
-FEATURE_CACHE_TEST = Path(__file__).parent.parent / "cache_test_features.parquet"
+CACHE_DIR = Path(__file__).parent.parent / "cache"
+CACHE_DIR.mkdir(exist_ok=True)
+FEATURE_CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
+FEATURE_CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
 
 
 # ---------------------------------------------------------------------------
