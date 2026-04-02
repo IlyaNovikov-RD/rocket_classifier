@@ -8,7 +8,7 @@ Generates ``demo.png`` in the project root containing two subplots:
              illustrating the sharp ignition spike that distinguishes propelled
              rockets from passive or erratic objects.
 
-Uses ``_compute_derivatives`` from ``src/features.py`` directly so that the
+Uses ``_compute_derivatives`` from ``rocket_classifier/features.py`` directly so that the
 visualization reflects the same physics code path used in production.
 """
 

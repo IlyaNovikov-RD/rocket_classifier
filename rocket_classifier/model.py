@@ -53,8 +53,9 @@ class RocketClassifier:
     """Inference wrapper for the pre-trained LightGBM rocket classifier.
 
     Loads the model and imputation artifacts once, then provides a
-    ``predict`` method that takes a feature DataFrame (76 columns from
-    ``build_features``) and returns threshold-tuned class predictions.
+    ``predict`` method that takes a feature array (61 columns, selected
+    from the 76 engineered by ``build_features`` via ``SELECTED_FEATURES``)
+    and returns threshold-tuned class predictions.
 
     Usage::
 
