@@ -34,18 +34,13 @@ _WEIGHTS = Path(__file__).parent.parent / "weights"
 MODEL_PATH = _WEIGHTS / "model.pkl"
 MEDIANS_PATH = _WEIGHTS / "train_medians.npy"
 BIASES_PATH = _WEIGHTS / "threshold_biases.npy"
-MODEL_RELEASE_URL = (
+_RELEASE_BASE = (
     "https://github.com/IlyaNovikov-RD/rocket_classifier"
-    "/releases/download/v1.0.0/model.pkl"
+    "/releases/latest/download"
 )
-MEDIANS_RELEASE_URL = (
-    "https://github.com/IlyaNovikov-RD/rocket_classifier"
-    "/releases/download/v1.0.0/train_medians.npy"
-)
-BIASES_RELEASE_URL = (
-    "https://github.com/IlyaNovikov-RD/rocket_classifier"
-    "/releases/download/v1.0.0/threshold_biases.npy"
-)
+MODEL_RELEASE_URL = f"{_RELEASE_BASE}/model.pkl"
+MEDIANS_RELEASE_URL = f"{_RELEASE_BASE}/train_medians.npy"
+BIASES_RELEASE_URL = f"{_RELEASE_BASE}/threshold_biases.npy"
 
 # ── Display constants ──────────────────────────────────────────────────────────
 CLASS_NAMES = {0: "Class 0", 1: "Class 1", 2: "Class 2"}
