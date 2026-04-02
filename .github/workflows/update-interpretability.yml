@@ -1,0 +1,50 @@
+name: Update Interpretability Artifacts
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:  # allow manual trigger
+
+jobs:
+  interpret:
+    name: Regenerate SHAP plot and report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Download model artifacts
+        run: uv run python download_weights.py
+
+      - name: Download data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Data must be uploaded as release assets or stored in a separate
+          # release. Adjust the URLs below to match your data release.
+          echo "::warning::Data files not available in CI — run 'make interpret' locally after deploying a new model."
+
+      - name: Run interpretability pipeline
+        run: uv run python research/interpret.py
+        # NOTE: This step will fail if data/train.csv is not available.
+        # Run 'make interpret' locally after deploying a new model instead.
+        continue-on-error: true
+
+      - name: Commit updated assets
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs: regenerate SHAP artifacts after model update [skip ci]"
+          file_pattern: "assets/shap_summary.png assets/interpretation_report.txt"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
