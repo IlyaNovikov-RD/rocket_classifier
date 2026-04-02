@@ -317,4 +317,4 @@ The 0.05% residual error rate reflects genuine physical ambiguity: different roc
 **Ilya Novikov**
 
 [![GitHub](https://img.shields.io/badge/GitHub-IlyaNovikov--RD-181717?logo=github)](https://github.com/IlyaNovikov-RD)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Ilya_Novikov-0A66C2?logo=linkedin)](https://linkedin.com/in/PLACEHOLDER)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Ilya_Novikov-0A66C2?logo=linkedin)](https://www.linkedin.com/in/ilya-novikov-data/)
