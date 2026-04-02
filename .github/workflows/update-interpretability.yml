@@ -1,19 +1,32 @@
-name: Update Interpretability Artifacts
+name: Post-Release Pipeline
+
+# Triggers automatically when a new GitHub Release is published.
+# Automates everything that can be automated after a model is deployed:
+#   1. Download model artifacts + feature caches from the release
+#   2. Run inference pipeline → submission.csv
+#   3. Run interpretability analysis → SHAP plot + report
+#   4. Upload submission.csv to the release assets
+#   5. Commit updated assets/ back to main
+#
+# The only step that requires a human: publishing the GitHub Release.
 
 on:
   release:
     types: [published]
-  workflow_dispatch:  # allow manual trigger
+  workflow_dispatch:  # allow manual trigger from GitHub Actions UI
 
 jobs:
-  interpret:
-    name: Regenerate SHAP plot and report
+  pipeline:
+    name: Inference + Interpretability
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to commit assets back to repo
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
@@ -24,27 +37,32 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Download model artifacts
-        run: uv run python download_weights.py
+      - name: Download model artifacts + feature caches
+        run: uv run python download_weights.py --with-caches
 
-      - name: Download data
+      - name: Run inference pipeline
+        run: uv run python -m rocket_classifier.main
+
+      - name: Run interpretability analysis
+        run: uv run python research/interpret.py
+
+      - name: Upload submission.csv to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Data must be uploaded as release assets or stored in a separate
-          # release. Adjust the URLs below to match your data release.
-          echo "::warning::Data files not available in CI — run 'make interpret' locally after deploying a new model."
-
-      - name: Run interpretability pipeline
-        run: uv run python research/interpret.py
-        # NOTE: This step will fail if data/train.csv is not available.
-        # Run 'make interpret' locally after deploying a new model instead.
-        continue-on-error: true
+          TAG="${{ github.event.release.tag_name }}"
+          # Remove old submission.csv from release if it exists, then re-upload
+          gh release delete-asset "$TAG" submission.csv --yes 2>/dev/null || true
+          gh release upload "$TAG" submission.csv
 
       - name: Commit updated assets
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "docs: regenerate SHAP artifacts after model update [skip ci]"
+          commit_message: |
+            docs: regenerate artifacts after ${{ github.event.release.tag_name }} release [skip ci]
+
+            - assets/shap_summary.png (SHAP feature importance)
+            - assets/interpretation_report.txt (ranked feature report)
           file_pattern: "assets/shap_summary.png assets/interpretation_report.txt"
           commit_user_name: "github-actions[bot]"
           commit_user_email: "github-actions[bot]@users.noreply.github.com"

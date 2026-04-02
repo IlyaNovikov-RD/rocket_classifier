@@ -27,11 +27,19 @@ ARTIFACTS = [
     "threshold_biases.npy",
 ]
 
+# Feature caches — large parquet files (~15 MB total).
+# Optional: skip if you have data/ and want to recompute from scratch.
+CACHE_ARTIFACTS = [
+    "cache_train_features.parquet",
+    "cache_test_features.parquet",
+]
+
 ROOT = Path(__file__).parent
 
 
-def main() -> None:
-    for name in ARTIFACTS:
+def main(include_caches: bool = False) -> None:
+    targets = ARTIFACTS + (CACHE_ARTIFACTS if include_caches else [])
+    for name in targets:
         dest = ROOT / name
         if dest.exists():
             print(f"  {name} — already exists, skipping")
@@ -49,4 +57,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    caches = "--with-caches" in sys.argv
+    main(include_caches=caches)
