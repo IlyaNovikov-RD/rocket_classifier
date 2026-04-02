@@ -7,7 +7,7 @@ threshold-tuned predictions optimised for the min-recall metric.
 No training logic lives here — all training was performed in Colab on
 H100 GPU. This module is the production inference entrypoint.
 
-Production artifacts (stored in GitHub Release v1.0.0):
+Production artifacts (served from the latest GitHub Release — run ``make download-weights``):
     - model.pkl           — LightGBM Booster (61 features, 2011 trees, depth 12)
     - train_medians.npy   — per-feature NaN imputation medians (61 values)
     - threshold_biases.npy — per-class log-probability biases [0, 1.063, 2.177]

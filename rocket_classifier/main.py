@@ -113,8 +113,7 @@ def main() -> None:
     # --- Step 4: Load classifier ---
     if not MODEL_PATH.exists():
         logger.error(
-            "Model not found at %s. Download from GitHub Release v1.0.0 or "
-            "run research/colab_brute_force_optimization.py on Colab.",
+            "Model not found at %s. Run: make download-weights",
             MODEL_PATH,
         )
         return
