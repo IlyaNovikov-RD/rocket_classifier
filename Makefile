@@ -10,8 +10,9 @@
 #   make format     Auto-format source files with ruff
 #   make demo       Launch the Streamlit interactive demo
 #   make lock       Regenerate uv.lock from pyproject.toml
+#   make download-weights  Download model artifacts from GitHub Release
 
-.PHONY: install test lint format demo lock
+.PHONY: install test lint format demo lock download-weights
 
 install:
 	uv sync
@@ -30,3 +31,6 @@ demo:
 
 lock:
 	uv lock
+
+download-weights:
+	uv run python download_weights.py
