@@ -51,6 +51,7 @@ Upload to /content/ (or adjust DATA_DIR below):
 from __future__ import annotations
 
 import logging
+import os
 import time
 import warnings
 from pathlib import Path
@@ -143,6 +144,12 @@ GROUP_FEATURES = [
 # variance across many firing events; we want to merge those into one group.
 GROUP_EPS = 1.0
 GROUP_MIN_SAMPLES = 3  # at least 3 rockets total to constitute a rebel group
+
+# H100 Colab instances have ~26 physical CPU cores.
+# LightGBM on 32k samples is CPU-bound — the GPU adds no benefit at this scale
+# (transfer overhead > compute savings). Pin threads explicitly to avoid the
+# overhead of n_jobs=-1 re-negotiating thread count on every fit.
+N_JOBS = int(os.cpu_count() or 4)
 
 # %%
 # ── Metric ─────────────────────────────────────────────────────────────────────
@@ -455,7 +462,7 @@ baseline_params = dict(
     objective="multiclass",
     num_class=3,
     class_weight="balanced",
-    n_jobs=-1,
+    n_jobs=N_JOBS,
     random_state=RANDOM_SEED,
 )
 
@@ -486,7 +493,7 @@ def make_objective(X: np.ndarray, y: np.ndarray, groups: np.ndarray):
             objective        = "multiclass",
             num_class        = 3,
             class_weight     = "balanced",
-            n_jobs           = -1,
+            n_jobs           = N_JOBS,
             random_state     = RANDOM_SEED,
         )
         mean_recall, _ = cv_min_recall(X, y, groups, params)
