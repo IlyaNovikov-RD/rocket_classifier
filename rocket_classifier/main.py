@@ -60,11 +60,16 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return train, test, sample_sub
 
 
-def get_features(df: pd.DataFrame, cache_path: Path, name: str) -> pd.DataFrame:
+def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.DataFrame:
     """Return per-trajectory feature matrix, loading from cache if available."""
     if cache_path.exists():
         logger.info("Loading %s features from cache: %s", name, cache_path)
         return pd.read_parquet(cache_path)
+    if df is None:
+        raise FileNotFoundError(
+            f"Cache not found at {cache_path} and no raw data provided. "
+            "Run: make download-all"
+        )
     logger.info("Engineering %s features (this may take ~1-2 min)...", name)
     t0 = time.time()
     feats = build_features(df)
@@ -81,8 +86,8 @@ def main() -> None:
     """Run the inference pipeline end-to-end.
 
     Stages:
-        1. Load raw CSV data.
-        2. Validate training data against the Pydantic schema.
+        1. Load raw CSV data (skipped for train if both caches exist).
+        2. Validate training data against the Pydantic schema (skipped if cache exists).
         3. Engineer per-trajectory features (with Parquet caching).
         4. Load the pre-trained LightGBM classifier.
         5. Generate predictions for the test set.
@@ -92,16 +97,27 @@ def main() -> None:
     CACHE_DIR.mkdir(exist_ok=True)
     OUTPUTS_DIR.mkdir(exist_ok=True)
 
-    # --- Step 1: Load ---
-    train_raw, test_raw, sample_sub = load_data()
+    both_caches_exist = FEATURE_CACHE_TRAIN.exists() and FEATURE_CACHE_TEST.exists()
 
-    # --- Step 2: Schema validation ---
-    _valid, errors = validate_dataframe(train_raw, has_label=True)
-    if errors:
-        logger.warning(
-            "Schema validation: %d/%d rows have issues (pipeline continues)",
-            len(errors), len(train_raw),
-        )
+    # --- Step 1: Load ---
+    # When both feature caches are present, skip loading train.csv entirely —
+    # it is only needed to build features, which are already cached.
+    if both_caches_exist:
+        logger.info("Feature caches found — skipping train.csv load and schema validation.")
+        _sample_sub_path = DATA_DIR / "sample_submission.csv"
+        sample_sub = pd.read_csv(_sample_sub_path)
+        train_raw = None
+        test_raw = None
+    else:
+        train_raw, test_raw, sample_sub = load_data()
+
+        # --- Step 2: Schema validation (only when rebuilding features) ---
+        _valid, errors = validate_dataframe(train_raw, has_label=True)
+        if errors:
+            logger.warning(
+                "Schema validation: %d/%d rows have issues (pipeline continues)",
+                len(errors), len(train_raw),
+            )
 
     # --- Step 3: Feature Engineering ---
     train_feats = get_features(train_raw, FEATURE_CACHE_TRAIN, "train")
