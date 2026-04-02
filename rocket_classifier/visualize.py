@@ -345,5 +345,5 @@ def make_demo_plot(output_path: Path) -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    output = Path(__file__).parent.parent / "demo.png"
+    output = Path(__file__).parent.parent / "assets" / "demo.png"
     make_demo_plot(output)

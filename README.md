@@ -9,7 +9,7 @@
 > **[Live Demo — novikov-rocket-lab.streamlit.app](https://novikov-rocket-lab.streamlit.app/)**
 > Adjust physics sliders and watch the LightGBM model classify trajectories in real time.
 
-![Physics-Informed Feature Visualization](demo.png)
+![Physics-Informed Feature Visualization](assets/demo.png)
 
 ---
 
@@ -175,8 +175,11 @@ git clone https://github.com/IlyaNovikov-RD/rocket_classifier.git
 cd rocket_classifier
 uv sync
 
+# Download model artifacts from GitHub Release (~6 MB)
+make download-weights
+# or: python download_weights.py
+
 # Run the inference pipeline (outputs submission.csv)
-# Requires model.pkl, train_medians.npy, threshold_biases.npy from GitHub Release
 uv run python -m rocket_classifier.main
 
 # Launch the interactive demo (opens localhost:8501)
@@ -192,6 +195,7 @@ make lint      # ruff check
 make format    # ruff format
 make demo      # streamlit demo
 make lock      # regenerate uv.lock
+make download-weights  # fetch model artifacts from release
 ```
 
 ### Docker
@@ -244,7 +248,7 @@ ruff.toml                       # Linter/formatter config (target: py312)
 
 ## Model Interpretability
 
-![SHAP Feature Importance](shap_summary.png)
+![SHAP Feature Importance](assets/shap_summary.png)
 
 `rocket_classifier/interpret.py` computes exact SHAP values via `TreeExplainer` on a 500-trajectory test sample. Top discriminators:
 
@@ -273,7 +277,7 @@ A five-part empirical proof (`colab_bayes_error_proof.py`) establishes that 1.0 
 
 Part 5 is the definitive proof: two clusters of trajectories (class 1 vs class 2) are essentially identical in the 76-dimensional feature space but carry different labels. Any classifier that correctly labels one cluster will misclassify the other — guaranteed, regardless of architecture or post-processing.
 
-![KNN Ambiguity of Misclassified Trajectories](bayes_error_knn.png)
+![KNN Ambiguity of Misclassified Trajectories](assets/bayes_error_knn.png)
 
 The 0.05% residual error rate reflects genuine physical ambiguity: different rocket types that produced statistically indistinguishable 3D radar tracks under the available feature representation.
 
@@ -285,3 +289,12 @@ The 0.05% residual error rate reflects genuine physical ambiguity: different roc
 2. **Frictionless ballistic physics** — features are physically meaningful under point-mass assumption.
 3. **One label per trajectory** — all pings in a `traj_ind` share the same class.
 4. **Trajectory independence** — each flight is independent; no cross-trajectory temporal features.
+
+---
+
+## Author
+
+**Ilya Novikov**
+
+[![GitHub](https://img.shields.io/badge/GitHub-IlyaNovikov--RD-181717?logo=github)](https://github.com/IlyaNovikov-RD)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Ilya_Novikov-0A66C2?logo=linkedin)](https://linkedin.com/in/PLACEHOLDER)
