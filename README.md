@@ -273,6 +273,8 @@ A five-part empirical proof (`colab_bayes_error_proof.py`) establishes that 1.0 
 
 Part 5 is the definitive proof: two clusters of trajectories (class 1 vs class 2) are essentially identical in the 76-dimensional feature space but carry different labels. Any classifier that correctly labels one cluster will misclassify the other — guaranteed, regardless of architecture or post-processing.
 
+![KNN Ambiguity of Misclassified Trajectories](bayes_error_knn.png)
+
 The 0.05% residual error rate reflects genuine physical ambiguity: different rocket types that produced statistically indistinguishable 3D radar tracks under the available feature representation.
 
 ---
