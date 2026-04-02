@@ -194,11 +194,11 @@ The irreducible work is 8,185 samples × 2,011 trees × depth 12 = **197.5M comp
 
 ```
 Theoretical compute floor: 197.5M ops / 4 cores / 10^9 ops/s  = ~50ms
-Measured inference:                                              ~2.3s
-Overhead factor:                                                 ~46x
+Measured inference:                                              ~1.5s
+Overhead factor:                                                 ~30x
 ```
 
-This 46x overhead is explained entirely by **cache miss cost**: the 6.1 MB model does not fit in L1/L2 cache (256 KB / 1 MB per core). Each tree traversal follows random pointers through L3 and main memory. Effective memory bandwidth for irregular-access tree walks is ~1–5 GB/s vs the raw L3 peak of ~100 GB/s.
+This 30x overhead is explained entirely by **cache miss cost**: the 6.1 MB model does not fit in L1/L2 cache (256 KB / 1 MB per core). Each tree traversal follows random pointers through L3 and main memory. Effective memory bandwidth for irregular-access tree walks is ~1–5 GB/s vs the raw L3 peak of ~100 GB/s.
 
 **3. Algorithm irreducibility:**
 
@@ -215,7 +215,7 @@ No further software optimizations are possible without different hardware (more 
 
 **5. Persistent-service mode:**
 
-For a long-running server that loads the model once and handles repeated requests, the ONNX session + JIT overhead (~1.7s) is paid only once. Steady-state per-batch latency drops to **~1.3s** (pure inference + I/O).
+For a long-running server that loads the model once and handles repeated requests, the ONNX session + JIT overhead (~0.8s) is paid only once. Steady-state per-batch latency drops to **~1.3s** (pure inference + I/O).
 
 ### Cold start (no caches, raw CSV only)
 
@@ -224,7 +224,7 @@ For a long-running server that loads the model once and handles repeated request
 | Load raw CSVs (1M+ rows) | ~4s |
 | Pydantic schema validation (1M rows, row-by-row) | ~3m |
 | Feature engineering (76 features x 32k trajectories) | ~96s |
-| Model inference | ~2s |
+| Model inference | ~1.5s |
 | **Total cold start** | **~5 min** |
 
 After the first run, feature matrices are written to `cache/*.parquet` (portable) and `cache/*.feather` (fast Arrow IPC sidecar), reducing all subsequent runs to ~3s.
