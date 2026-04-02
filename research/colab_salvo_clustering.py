@@ -18,11 +18,17 @@ Bayes-error ceiling established by kinematic features alone.
 
 Business assumptions leveraged (from assignment)
 -------------------------------------------------
-1. Rockets are fired in salvos (temporal proximity → cluster by launch time)
-2. Rebel groups are geographically concentrated (spatial proximity → cluster
-   by launch_x, launch_y)
-3. Each rebel group buys rockets independently (same group → same class)
-   → salvo membership is a proxy for class label
+3a. Each launcher has a different payload capacity (max rockets per launcher)
+    → group_max_salvo_size is the empirical upper bound = launcher capacity proxy
+3b. Rockets are fired in salvos (together or with short delay)
+    → spatio-temporal DBSCAN on (launch_x, launch_y, time) identifies episodes
+3c. Few rebel groups concentrated in geographic areas (persistent bases)
+    → pure-spatial DBSCAN on (launch_x, launch_y) identifies the REBEL GROUP,
+      which is different from a single salvo: the same base fires many salvos
+      over weeks/months — all from the same group, all the same rocket class
+3d. Each rebel group independently buys rockets (different MO, no umbrella org)
+    → same group = same class across ALL their salvos, not just one episode
+    → rebel_group_id is the strongest label proxy in the entire feature set
 
 Leakage-safe design
 -------------------
@@ -117,6 +123,26 @@ SALVO_FEATURES = [
     "salvo_spatial_spread_m", # max pairwise launch-point distance within the salvo
     "salvo_time_rank",        # launch order of this rocket within its salvo (1-indexed)
 ]
+
+# Rebel-group features (assumption 3c + 3d + 3a):
+#   3c: few groups, geographically concentrated → pure-spatial DBSCAN identifies the
+#       PERSISTENT base, not just a single firing event
+#   3d: each group independently buys rockets → same group = same rocket class across
+#       ALL their salvos over time (this is the strongest assumption)
+#   3a: each launcher has a different payload capacity → group_max_salvo_size is the
+#       largest salvo ever observed from this group, i.e. the launcher capacity proxy
+GROUP_FEATURES = [
+    "rebel_group_id",         # integer ID of the persistent geographic rebel base
+    "group_total_rockets",    # total trajectories attributed to this group (activity level)
+    "group_n_salvos",         # number of distinct firing events from this group
+    "group_max_salvo_size",   # largest salvo ever seen from this group (launcher capacity proxy)
+]
+
+# eps for pure-spatial rebel-group clustering (no time component).
+# Larger than DBSCAN_EPS because the same rebel base may have small positional
+# variance across many firing events; we want to merge those into one group.
+GROUP_EPS = 1.0
+GROUP_MIN_SAMPLES = 3  # at least 3 rockets total to constitute a rebel group
 
 # %%
 # ── Metric ─────────────────────────────────────────────────────────────────────
@@ -294,6 +320,76 @@ log.info(
 )
 
 # %%
+# ── Step 5b: Rebel group clustering (pure-spatial, no time) ───────────────────
+#
+# CRITICAL distinction from Step 3 (spatio-temporal salvo clustering):
+#
+#   Salvo    = a single firing event at time T from location X.
+#              A rebel group at the same base fires at T=0, T=90 days, T=180 days
+#              → three separate salvos, three different salvo_ids.
+#
+#   Rebel group = the PERSISTENT geographic base that fires many salvos over time.
+#              Clustering by (launch_x, launch_y) WITHOUT time merges all salvos
+#              from the same base into one group.
+#
+# Why this matters (assignment assumptions 3c + 3d):
+#   "few rebel groups, geographically concentrated, each buying rockets independently"
+#   → every trajectory from group X is the SAME rocket class, regardless of when
+#     it was fired. rebel_group_id is therefore a strong label proxy that persists
+#     across time, unlike salvo_id which is episode-specific.
+#
+# Assignment assumption 3a (launcher capacity):
+#   group_max_salvo_size = the largest salvo ever observed from this base.
+#   Each launcher has a fixed max capacity; this is its empirical upper bound.
+
+log.info(
+    "Running rebel group clustering (pure-spatial, eps=%.2f, min_samples=%d)...",
+    GROUP_EPS, GROUP_MIN_SAMPLES,
+)
+
+spatial_input = feats[["launch_x", "launch_y"]].fillna(0.0)
+spatial_scaler = StandardScaler()
+spatial_scaled = spatial_scaler.fit_transform(spatial_input)
+
+group_dbscan = DBSCAN(eps=GROUP_EPS, min_samples=GROUP_MIN_SAMPLES, n_jobs=-1)
+raw_group_labels = group_dbscan.fit_predict(spatial_scaled)
+
+n_groups = len(set(raw_group_labels)) - (1 if -1 in raw_group_labels else 0)
+n_group_noise = (raw_group_labels == -1).sum()
+log.info(
+    "Rebel group result: %d groups | %d solo rockets (noise)",
+    n_groups, n_group_noise,
+)
+
+# Noise rockets → unique group IDs (they are from unknown/isolated positions)
+next_group_id = raw_group_labels.max() + 1
+group_id_arr = raw_group_labels.copy()
+for i, lbl in enumerate(group_id_arr):
+    if lbl == -1:
+        group_id_arr[i] = next_group_id
+        next_group_id += 1
+
+feats["rebel_group_id"] = group_id_arr
+
+# Build group-level aggregate features and merge back
+group_stats = feats.groupby("rebel_group_id").agg(
+    group_total_rockets=("rebel_group_id", "count"),
+    group_n_salvos=("salvo_id", "nunique"),
+    group_max_salvo_size=("salvo_size", "max"),
+)
+feats = feats.join(group_stats, on="rebel_group_id")
+
+log.info("Rebel group summary (top groups by total rockets):")
+print(
+    feats.groupby("rebel_group_id")[["group_total_rockets", "group_n_salvos",
+                                      "group_max_salvo_size", "label"]]
+    .first()
+    .sort_values("group_total_rockets", ascending=False)
+    .head(10)
+    .to_string()
+)
+
+# %%
 # ── Step 6: Build feature matrices ────────────────────────────────────────────
 
 y = feats["label"].to_numpy(dtype=int)
@@ -307,12 +403,17 @@ def impute(X: np.ndarray) -> np.ndarray:
         X[np.isnan(X[:, col]), col] = medians[col]
     return X
 
+ALL_NEW_FEATURES = SALVO_FEATURES + GROUP_FEATURES
+
 X_baseline = impute(feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32))
-X_enriched = impute(feats.reindex(columns=SELECTED_FEATURES + SALVO_FEATURES).to_numpy(dtype=np.float32))
+X_enriched = impute(feats.reindex(columns=SELECTED_FEATURES + ALL_NEW_FEATURES).to_numpy(dtype=np.float32))
 salvo_ids  = feats["salvo_id"].to_numpy(dtype=int)
 
 log.info("Baseline features : %s", X_baseline.shape)
-log.info("Enriched features : %s  (+%d salvo features)", X_enriched.shape, len(SALVO_FEATURES))
+log.info(
+    "Enriched features : %s  (+%d salvo + %d rebel-group features)",
+    X_enriched.shape, len(SALVO_FEATURES), len(GROUP_FEATURES),
+)
 
 # %%
 # ── Step 7: Cross-validated evaluation helper ──────────────────────────────────
@@ -447,7 +548,7 @@ log.info("Training final model on full data to get feature importances...")
 final_clf = LGBMClassifier(**best_params)
 final_clf.fit(X_enriched, y)
 
-feature_names = SELECTED_FEATURES + SALVO_FEATURES
+feature_names = SELECTED_FEATURES + ALL_NEW_FEATURES
 importances = pd.Series(
     final_clf.feature_importances_,
     index=feature_names,
@@ -458,6 +559,11 @@ print(importances.head(20).to_string())
 
 print("\n  Salvo feature importances:")
 for feat in SALVO_FEATURES:
+    rank = importances.index.get_loc(feat) + 1
+    print(f"    {feat:<30} rank={rank:>3}  importance={importances[feat]:.1f}")
+
+print("\n  Rebel group feature importances:")
+for feat in GROUP_FEATURES:
     rank = importances.index.get_loc(feat) + 1
     print(f"    {feat:<30} rank={rank:>3}  importance={importances[feat]:.1f}")
 
