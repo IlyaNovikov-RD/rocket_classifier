@@ -175,12 +175,14 @@ git clone https://github.com/IlyaNovikov-RD/rocket_classifier.git
 cd rocket_classifier
 uv sync
 
-# Download model artifacts from GitHub Release (~6 MB)
-make download-weights
-# or: python download_weights.py
+# Download everything and run the full pipeline in one command (~20 MB download)
+make pipeline
+# Equivalent to: download-all → run inference → regenerate SHAP assets
 
-# Run the inference pipeline (outputs submission.csv)
-uv run python -m rocket_classifier.main
+# Or step by step:
+make download-all    # model.pkl + medians + biases + feature caches
+make run             # inference pipeline → submission.csv
+make interpret       # SHAP plot + report → assets/
 
 # Launch the interactive demo (opens localhost:8501)
 uv run streamlit run rocket_classifier/app.py
@@ -194,8 +196,12 @@ make test      # 56 unit tests
 make lint      # ruff check
 make format    # ruff format
 make demo      # streamlit demo
-make lock      # regenerate uv.lock
-make download-weights  # fetch model artifacts from release
+make lock            # regenerate uv.lock
+make download-weights  # fetch model + medians + biases
+make download-all    # + feature caches (enables make run without data/)
+make run             # inference pipeline → submission.csv
+make interpret       # regenerate SHAP assets after model update
+make pipeline        # download-all + run + interpret (full local pipeline)
 ```
 
 ### Docker
