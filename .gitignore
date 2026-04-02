@@ -19,9 +19,10 @@ Thumbs.db
 # ── Data (large CSVs, not tracked) ───────────────────────────────────────────
 data/
 
-# ── Feature caches (large Parquet files, regenerated from data/) ──────────────
+# ── Feature caches (Parquet + Feather sidecars, regenerated from data/) ───────
 cache/
 *.parquet
+*.feather
 
 # ── Model artifacts (served from latest GitHub Release) ──────────────────────
 # Download with: make download-weights
