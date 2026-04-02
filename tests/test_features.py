@@ -213,7 +213,8 @@ class TestComputeDerivatives:
         This test documents the raw behavior: division by zero → inf/nan."""
         pos = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
         dt = np.array([0.0])
-        vel, _, _ = _compute_derivatives(pos, dt)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            vel, _, _ = _compute_derivatives(pos, dt)
         assert not np.isfinite(vel).all(), (
             "dt=0 should produce non-finite velocity; sanitization is the caller's responsibility"
         )
