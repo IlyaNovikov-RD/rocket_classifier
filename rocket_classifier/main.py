@@ -1,9 +1,14 @@
-"""Pipeline orchestrator: Load -> Validate -> Features -> Train -> Predict -> Export.
+"""Inference pipeline: Load features → Classify → Export submission.csv.
 
-Produces ``submission.csv`` in the project root matching the format of
-``data/sample_submission.csv``:
+This is the production entrypoint. It loads pre-computed feature matrices,
+runs the pre-trained LightGBM model with threshold-tuned predictions, and
+outputs ``submission.csv`` matching the competition format.
 
-    columns: label, trajectory_ind
+No model training occurs here — the model was trained on Colab H100 via
+``research/colab_brute_force_optimization.py`` and is loaded from disk.
+
+Usage:
+    python -m rocket_classifier.main
 """
 
 import logging
@@ -14,10 +19,14 @@ import numpy as np
 import pandas as pd
 
 from rocket_classifier.features import build_features
-from rocket_classifier.model import predict, train_with_cv
+from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
 from rocket_classifier.schema import validate_dataframe
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 OUTPUT_PATH = Path(__file__).parent.parent / "submission.csv"
@@ -28,16 +37,15 @@ FEATURE_CACHE_TRAIN = Path(__file__).parent.parent / "cache_train_features.parqu
 FEATURE_CACHE_TEST = Path(__file__).parent.parent / "cache_test_features.parquet"
 
 
+# ---------------------------------------------------------------------------
+# Data loading helpers
+# ---------------------------------------------------------------------------
+
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load raw CSV data from the data directory.
 
     Returns:
-        A tuple of three DataFrames:
-            - train: Labelled point-level trajectory data with columns
-              ``label``, ``time_stamp``, ``traj_ind``, ``x``, ``y``, ``z``.
-            - test: Unlabelled point-level trajectory data (no ``label`` column).
-            - sample_sub: Sample submission DataFrame with columns
-              ``label`` and ``trajectory_ind``, used for output formatting.
+        A tuple of (train, test, sample_sub) DataFrames.
     """
     logger.info("Loading raw data...")
     train = pd.read_csv(DATA_DIR / "train.csv")
@@ -49,24 +57,7 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def get_features(df: pd.DataFrame, cache_path: Path, name: str) -> pd.DataFrame:
-    """Return per-trajectory feature matrix, loading from Parquet cache if available.
-
-    On first run the features are computed from raw point-level data and
-    persisted to ``cache_path`` as a Parquet file. Subsequent runs load
-    directly from cache, reducing runtime from ~96 seconds to under 1 second
-    for the training split.
-
-    Args:
-        df: Raw point-level DataFrame passed to ``build_features`` when
-            the cache does not exist.
-        cache_path: Filesystem path where the Parquet cache is stored or
-            will be written.
-        name: Human-readable split name (e.g. ``"train"`` or ``"test"``)
-            used in log messages.
-
-    Returns:
-        Per-trajectory feature DataFrame indexed by ``traj_ind``.
-    """
+    """Return per-trajectory feature matrix, loading from cache if available."""
     if cache_path.exists():
         logger.info("Loading %s features from cache: %s", name, cache_path)
         return pd.read_parquet(cache_path)
@@ -78,16 +69,20 @@ def get_features(df: pd.DataFrame, cache_path: Path, name: str) -> pd.DataFrame:
     return feats
 
 
-def main() -> None:
-    """Run the full classification pipeline end-to-end.
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
-    Executes six sequential stages:
+def main() -> None:
+    """Run the inference pipeline end-to-end.
+
+    Stages:
         1. Load raw CSV data.
         2. Validate training data against the Pydantic schema.
         3. Engineer per-trajectory features (with Parquet caching).
-        4. Train XGBoost with 5-fold GroupKFold cross-validation.
+        4. Load the pre-trained LightGBM classifier.
         5. Generate predictions for the test set.
-        6. Export ``submission.csv`` matching the sample submission format.
+        6. Export ``submission.csv``.
     """
     t_start = time.time()
 
@@ -98,73 +93,62 @@ def main() -> None:
     _valid, errors = validate_dataframe(train_raw, has_label=True)
     if errors:
         logger.warning(
-            "Schema validation: %d/%d rows have issues (pipeline continues with raw data)",
-            len(errors),
-            len(train_raw),
+            "Schema validation: %d/%d rows have issues (pipeline continues)",
+            len(errors), len(train_raw),
         )
 
     # --- Step 3: Feature Engineering ---
     train_feats = get_features(train_raw, FEATURE_CACHE_TRAIN, "train")
     test_feats = get_features(test_raw, FEATURE_CACHE_TEST, "test")
 
-    # Align feature columns (train has 'label', test doesn't)
-    feature_cols = [c for c in train_feats.columns if c != "label"]
-    X_train = train_feats[feature_cols]
-    y_train = train_feats["label"].to_numpy(dtype=int)
-    groups = np.array(train_feats.index.tolist())  # traj_ind as group
+    # --- Step 4: Load classifier ---
+    if not MODEL_PATH.exists():
+        logger.error(
+            "Model not found at %s. Download from GitHub Release v1.0.0 or "
+            "run research/colab_brute_force_optimization.py on Colab.",
+            MODEL_PATH,
+        )
+        return
 
-    logger.info(
-        "Label distribution — 0: %d, 1: %d, 2: %d",
-        (y_train == 0).sum(),
-        (y_train == 1).sum(),
-        (y_train == 2).sum(),
+    clf = RocketClassifier.from_artifacts(
+        model_path=MODEL_PATH,
+        medians_path=MEDIANS_PATH,
+        biases_path=BIASES_PATH if BIASES_PATH.exists() else None,
     )
 
-    # Align test columns to train (fill any structurally missing with NaN)
-    X_test = test_feats.reindex(columns=feature_cols)
+    # Select the 61 production features from the 76-column matrix
+    X_test = test_feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32)
 
-    logger.info("Feature matrix — train: %s, test: %s", X_train.shape, X_test.shape)
+    # Log label distribution from training data (for reference)
+    if "label" in train_feats.columns:
+        y_train = train_feats["label"].to_numpy(dtype=int)
+        logger.info(
+            "Label distribution — 0: %d, 1: %d, 2: %d",
+            (y_train == 0).sum(), (y_train == 1).sum(), (y_train == 2).sum(),
+        )
 
-    # --- Step 4: Train with CV ---
-    # NaN imputation now happens inside train_with_cv per-fold (no leakage)
-    model, fold_scores, train_medians, biases = train_with_cv(X_train, y_train, groups, n_splits=5)
-    logger.info("Final CV min-recall scores: %s", [f"{s:.4f}" for s in fold_scores])
-
-    # Persist the trained model, imputation medians, and threshold biases
-    model.save_model(str(MODEL_PATH))
-    np.save(MEDIANS_PATH, train_medians)
-    np.save(BIASES_PATH, biases)
-    logger.info("Model saved to: %s", MODEL_PATH)
-    logger.info("Train medians saved to: %s", MEDIANS_PATH)
-    logger.info("Threshold biases saved to: %s", BIASES_PATH)
+    logger.info("Test features: %s", X_test.shape)
 
     # --- Step 5: Predict ---
-    y_pred = predict(model, X_test, train_medians, biases)
+    y_pred = clf.predict(X_test)
     logger.info(
         "Test predictions — 0: %d, 1: %d, 2: %d",
-        (y_pred == 0).sum(),
-        (y_pred == 1).sum(),
-        (y_pred == 2).sum(),
+        (y_pred == 0).sum(), (y_pred == 1).sum(), (y_pred == 2).sum(),
     )
 
     # --- Step 6: Export submission ---
-    # sample_submission.csv columns: label, trajectory_ind
-    submission = pd.DataFrame(
-        {
-            "trajectory_ind": test_feats.index.tolist(),
-            "label": y_pred,
-        }
-    )
-
-    # Ensure ordering matches sample_submission.csv
+    submission = pd.DataFrame({
+        "trajectory_ind": test_feats.index.tolist(),
+        "label": y_pred,
+    })
     submission = (
-        submission.set_index("trajectory_ind").reindex(sample_sub["trajectory_ind"]).reset_index()
+        submission.set_index("trajectory_ind")
+        .reindex(sample_sub["trajectory_ind"])
+        .reset_index()
     )
-
-    # Match exact column order of sample_submission: label, trajectory_ind
     submission = submission[["label", "trajectory_ind"]]
-
     submission.to_csv(OUTPUT_PATH, index=False)
+
     logger.info("submission.csv written to: %s", OUTPUT_PATH)
     logger.info(
         "Submission label dist — 0: %d, 1: %d, 2: %d",
@@ -173,7 +157,7 @@ def main() -> None:
         (submission["label"] == 2).sum(),
     )
     logger.info("Total pipeline time: %.1fs", time.time() - t_start)
-    logger.info("Done. submission.csv is ready for review.")
+    logger.info("Done.")
 
 
 if __name__ == "__main__":

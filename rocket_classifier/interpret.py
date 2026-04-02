@@ -31,10 +31,10 @@ import pandas as pd
 import shap
 
 from rocket_classifier.features import build_features
-from rocket_classifier.model import train_with_cv
+from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
 
 if TYPE_CHECKING:
-    from xgboost import XGBClassifier
+    pass  # XGBClassifier no longer needed — using LightGBM via RocketClassifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -126,29 +126,30 @@ def load_features() -> tuple[pd.DataFrame, pd.DataFrame]:
     return train_feats, test_feats
 
 
-def train_model(
+def load_model(
     train_feats: pd.DataFrame,
-) -> tuple[XGBClassifier, list[str], pd.DataFrame]:
-    """Train XGBoost on the full training set and return the fitted model."""
-    feature_cols = [c for c in train_feats.columns if c != "label"]
-    X_train = train_feats[feature_cols]
-    y_train = train_feats["label"].to_numpy(dtype=int)
-    groups = np.array(train_feats.index.tolist())
+) -> tuple[object, list[str], pd.DataFrame]:
+    """Load the production LightGBM model for SHAP analysis."""
+    model_path = ROOT / "model.pkl"
+    medians_path = ROOT / "train_medians.npy"
 
-    logger.info("Training XGBoost model for SHAP analysis (5-fold CV + full retrain)...")
-    model, fold_scores, train_medians, _biases = train_with_cv(X_train, y_train, groups, n_splits=5)
-    logger.info("CV min-recall: %.4f ± %.4f", np.mean(fold_scores), np.std(fold_scores))
+    if not model_path.exists():
+        msg = f"Model not found at {model_path}. Download from GitHub Release v1.0.0."
+        raise FileNotFoundError(msg)
 
-    # Impute NaN for SHAP computation (using the same medians as inference)
-    X_train_filled = X_train.fillna(pd.Series(train_medians, index=feature_cols))
-    return model, feature_cols, X_train_filled
+    clf = RocketClassifier.from_artifacts(model_path, medians_path)
+
+    feature_cols = SELECTED_FEATURES
+    X_train = train_feats.reindex(columns=feature_cols)
+    X_train_filled = X_train.fillna(pd.Series(clf.medians, index=feature_cols))
+    return clf.model, feature_cols, X_train_filled
 
 
 SHAP_SAMPLE_SIZE = 500  # trajectories to explain — sufficient for stable importance ranks
 
 
 def compute_shap(
-    model: XGBClassifier, X_train: pd.DataFrame, X_test: pd.DataFrame,
+    model: object, X_train: pd.DataFrame, X_test: pd.DataFrame,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute exact SHAP values using TreeExplainer (tree_path_dependent mode).
 
@@ -358,7 +359,7 @@ def main() -> None:
 
     train_feats, test_feats = load_features()
 
-    model, feature_cols, X_train = train_model(train_feats)
+    model, feature_cols, X_train = load_model(train_feats)
 
     # Impute test NaN using train medians (consistent with training pipeline)
     X_test = test_feats.reindex(columns=feature_cols).fillna(X_train.median())

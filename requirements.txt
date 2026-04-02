@@ -43,14 +43,14 @@ jinja2==3.1.6
     #   pydeck
 joblib==1.5.3
     # via scikit-learn
-lightgbm>=4.0
-    # via rocket-classifier
 jsonschema==4.26.0
     # via altair
 jsonschema-specifications==2025.9.1
     # via jsonschema
 kiwisolver==1.5.0
     # via matplotlib
+lightgbm==4.6.0
+    # via rocket-classifier
 llvmlite==0.46.0
     # via numba
 markupsafe==3.0.3
@@ -66,6 +66,7 @@ numba==0.64.0
 numpy==2.4.3
     # via
     #   contourpy
+    #   lightgbm
     #   matplotlib
     #   numba
     #   pandas
@@ -134,6 +135,7 @@ scikit-learn==1.8.0
     #   shap
 scipy==1.17.1
     # via
+    #   lightgbm
     #   scikit-learn
     #   shap
     #   xgboost

@@ -28,27 +28,7 @@ import requests
 import streamlit as st
 
 from rocket_classifier.features import _extract_trajectory_features
-
-# The 61 features selected by automated backward elimination in Colab.
-# Dropping the 15 lowest-importance features improved CV min-recall.
-SELECTED_FEATURES = [
-    "n_points", "total_duration_s", "dt_std", "dt_max", "dt_median",
-    "speed_mean", "speed_std", "speed_min", "speed_max",
-    "vx_mean", "vx_std", "vx_min", "vx_max",
-    "vy_mean", "vy_std", "vy_min", "vy_max",
-    "vz_std", "vz_min", "vz_median",
-    "v_horiz_mean", "v_horiz_std", "v_horiz_min", "v_horiz_median",
-    "initial_speed", "initial_vz", "final_speed", "final_vz",
-    "acc_mag_mean", "acc_mag_std", "acc_mag_min", "acc_mag_max", "acc_mag_median",
-    "az_mean", "az_std", "az_min", "az_max", "az_median",
-    "acc_horiz_mean", "acc_horiz_std", "acc_horiz_min", "acc_horiz_max",
-    "mean_az",
-    "jerk_mag_mean", "jerk_mag_std", "jerk_mag_min", "jerk_mag_max", "jerk_mag_median",
-    "initial_z", "final_z", "delta_z_total", "apogee_relative", "time_to_apogee_s",
-    "x_range", "y_range", "z_range",
-    "max_horiz_range", "final_horiz_range", "path_length_3d",
-    "launch_x", "launch_y",
-]
+from rocket_classifier.model import SELECTED_FEATURES
 
 MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
 MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
