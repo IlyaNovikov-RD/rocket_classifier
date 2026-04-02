@@ -16,6 +16,7 @@ dependencies = [
     "shap>=0.44,<0.51",
     "pydantic>=2.12.5",
     "requests>=2.33.0",
+    "onnxruntime>=1.16",
 ]
 
 [dependency-groups]

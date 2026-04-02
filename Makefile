@@ -17,7 +17,7 @@
 #   make visualize         Regenerate demo.png (physics feature visualization)
 #   make pipeline          Full local pipeline: download-all → run → interpret
 
-.PHONY: install test lint format demo lock download-weights download-all run interpret visualize pipeline
+.PHONY: install test lint format demo lock download-weights download-all run interpret visualize pipeline export-model
 
 install:
 	uv sync
@@ -51,6 +51,9 @@ interpret:
 
 visualize:
 	uv run python research/visualize.py
+
+export-model:
+	uv run python export_fast_models.py
 
 pipeline: download-all run interpret
 	@echo "Pipeline complete. submission.csv and assets/ are up to date."

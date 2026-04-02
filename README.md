@@ -148,12 +148,43 @@ Three layers:
 
 ---
 
+## Pipeline Performance
+
+The operational system is designed to classify rockets as early as possible — every second counts in threat assessment. Pipeline runtimes measured on a Windows 11 machine (Intel CPU, 8,185 test trajectories, 61 features):
+
+### Operational mode (feature caches present)
+
+| Backend | Model load | Inference | Total pipeline |
+|---|---|---|---|
+| joblib + sklearn (original) | 0.13s | 5.26s | ~15s* |
+| native LightGBM | 0.12s | 3.27s | ~4s |
+| **ONNX Runtime** (production default) | **0.33s** | **2.04s** | **~5s** |
+
+*Original 15s included CSV loading and Pydantic schema validation (1M rows), now skipped when caches exist.
+
+The ONNX backend is selected automatically when `weights/model.onnx` is present. Generate it once with `make export-model`.
+
+### Cold start (no caches, raw CSV only)
+
+| Stage | Time |
+|---|---|
+| Load raw CSVs (1M+ rows) | ~4s |
+| Pydantic schema validation (1M rows, row-by-row) | ~3m |
+| Feature engineering (76 features × 32k trajectories) | ~96s |
+| Model inference | ~2s |
+| **Total cold start** | **~5 min** |
+
+After the first run the feature matrices are cached to `cache/*.parquet`, reducing all subsequent runs to ~5s.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology | Why |
 |---|---|---|
 | **Runtime** | Python 3.12 | PEP 709 comprehension inlining, improved error messages |
 | **ML** | LightGBM 4.x, scikit-learn | Leaf-wise gradient boosting, GPU-accelerated Optuna search, GroupKFold |
+| **Inference** | ONNX Runtime | 2.6x faster inference than sklearn wrapper via AVX2 vectorization |
 | **Validation** | Pydantic v2 | Schema enforcement on raw radar data before feature engineering |
 | **Explainability** | SHAP TreeExplainer | Exact Shapley values in O(TLD) time |
 | **Demo** | Streamlit, Plotly | Real-time 3D trajectory visualization |
@@ -214,6 +245,7 @@ make demo             # streamlit demo (localhost:8501)
 make lock             # regenerate uv.lock
 make download-weights # fetch weights/ from GitHub Release (model, medians, biases)
 make download-all     # + cache/ parquet caches (skips data/ recompute)
+make export-model     # convert model.pkl → model.onnx + model.lgb (run once after download)
 make run              # inference pipeline → outputs/submission.csv
 make interpret        # regenerate assets/ SHAP artifacts after model update
 make visualize        # regenerate assets/demo.png after feature changes
