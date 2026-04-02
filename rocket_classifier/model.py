@@ -20,6 +20,7 @@ Backend selection order (automatic, first available wins):
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import joblib
@@ -64,6 +65,13 @@ class _ONNXBackend:
     def __init__(self, session: object) -> None:
         self._session = session
         self._input_name: str = session.get_inputs()[0].name  # type: ignore[union-attr]
+        # Force JIT compilation now (during session init) rather than on
+        # the first real inference call, so pipeline latency is predictable.
+        n_feat: int = session.get_inputs()[0].shape[1]  # type: ignore[union-attr]
+        self._session.run(  # type: ignore[union-attr]
+            ["probabilities"],
+            {self._input_name: np.zeros((1, n_feat), dtype=np.float32)},
+        )
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         return self._session.run(  # type: ignore[union-attr]
@@ -151,6 +159,18 @@ class RocketClassifier:
                 import onnxruntime as ort
                 so = ort.SessionOptions()
                 so.log_severity_level = 3  # suppress shape mismatch warnings
+                # Use all available CPU cores — benchmarked optimal on this hardware.
+                # Thread sweep (4-core machine, 30 runs each):
+                #   1 thread: 2.29s | 2: 1.43s | 3: 1.33s | 4: 1.24s (best)
+                # Beyond cpu_count() there are no more physical cores to use.
+                so.intra_op_num_threads = os.cpu_count() or 1
+                so.inter_op_num_threads = 1
+                # Enable all graph optimisations and memory reuse patterns.
+                so.graph_optimization_level = (
+                    ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                )
+                so.enable_mem_pattern = True
+                so.enable_cpu_mem_arena = True
                 session = ort.InferenceSession(
                     str(onnx_path),
                     sess_options=so,
