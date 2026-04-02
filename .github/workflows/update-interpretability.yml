@@ -53,7 +53,7 @@ jobs:
           TAG="${{ github.event.release.tag_name }}"
           # Remove old submission.csv from release if it exists, then re-upload
           gh release delete-asset "$TAG" submission.csv --yes 2>/dev/null || true
-          gh release upload "$TAG" submission.csv
+          gh release upload "$TAG" outputs/submission.csv
 
       - name: Commit updated assets
         uses: stefanzweifel/git-auto-commit-action@v5

@@ -35,12 +35,16 @@ CACHE_ARTIFACTS = [
 ]
 
 ROOT = Path(__file__).parent
+WEIGHTS_DIR = ROOT / "weights"
+CACHE_DIR = ROOT / "cache"
+WEIGHTS_DIR.mkdir(exist_ok=True)
+CACHE_DIR.mkdir(exist_ok=True)
 
 
 def main(include_caches: bool = False) -> None:
     targets = ARTIFACTS + (CACHE_ARTIFACTS if include_caches else [])
     for name in targets:
-        dest = ROOT / name
+        dest = (CACHE_DIR if name.endswith(".parquet") else WEIGHTS_DIR) / name
         if dest.exists():
             print(f"  {name} — already exists, skipping")
             continue

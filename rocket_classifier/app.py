@@ -30,9 +30,10 @@ import streamlit as st
 from rocket_classifier.features import _extract_trajectory_features
 from rocket_classifier.model import SELECTED_FEATURES
 
-MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
-MEDIANS_PATH = Path(__file__).parent.parent / "train_medians.npy"
-BIASES_PATH = Path(__file__).parent.parent / "threshold_biases.npy"
+_WEIGHTS = Path(__file__).parent.parent / "weights"
+MODEL_PATH = _WEIGHTS / "model.pkl"
+MEDIANS_PATH = _WEIGHTS / "train_medians.npy"
+BIASES_PATH = _WEIGHTS / "threshold_biases.npy"
 MODEL_RELEASE_URL = (
     "https://github.com/IlyaNovikov-RD/rocket_classifier"
     "/releases/download/v1.0.0/model.pkl"

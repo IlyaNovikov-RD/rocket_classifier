@@ -41,8 +41,9 @@ logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).parent.parent
 DATA_DIR = ROOT / "data"
-CACHE_TRAIN = ROOT / "cache_train_features.parquet"
-CACHE_TEST = ROOT / "cache_test_features.parquet"
+CACHE_DIR = ROOT / "cache"
+CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
+CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
 SHAP_PLOT_PATH = ROOT / "assets" / "shap_summary.png"
 REPORT_PATH = ROOT / "assets" / "interpretation_report.txt"
 
@@ -130,8 +131,8 @@ def load_model(
     train_feats: pd.DataFrame,
 ) -> tuple[object, list[str], pd.DataFrame]:
     """Load the production LightGBM model for SHAP analysis."""
-    model_path = ROOT / "model.pkl"
-    medians_path = ROOT / "train_medians.npy"
+    model_path = ROOT / "weights" / "model.pkl"
+    medians_path = ROOT / "weights" / "train_medians.npy"
 
     if not model_path.exists():
         msg = f"Model not found at {model_path}. Download from GitHub Release v1.0.0."
