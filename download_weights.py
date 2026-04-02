@@ -18,7 +18,7 @@ from pathlib import Path
 
 RELEASE_BASE = (
     "https://github.com/IlyaNovikov-RD/rocket_classifier"
-    "/releases/download/v1.0.0"
+    "/releases/latest/download"
 )
 
 ARTIFACTS = [
