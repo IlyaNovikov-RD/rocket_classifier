@@ -334,6 +334,7 @@ research/                       # R&D and model analysis scripts
 ├── colab_brute_force_optimization.py   # Feature selection + 50-trial Optuna → 0.9995
 ├── colab_bayes_error_proof.py          # 5-part proof that 1.0 is impossible
 ├── colab_extended_lgbm_optuna.py       # 142 features + 100 trials + top-5 ensemble
+├── colab_final_ceiling_breaker.py      # 8h H100 experiment attempting to break 0.9995
 ├── colab_sequence_model.py             # 1D-CNN on raw sequences (0.9431)
 └── colab_transformer_model.py          # Transformer on raw sequences (0.9588)
 
