@@ -11,8 +11,9 @@
 #   make demo       Launch the Streamlit interactive demo
 #   make lock       Regenerate uv.lock from pyproject.toml
 #   make download-weights  Download model artifacts from GitHub Release
+#   make interpret         Regenerate SHAP plot + report after a new model is deployed
 
-.PHONY: install test lint format demo lock download-weights
+.PHONY: install test lint format demo lock download-weights interpret
 
 install:
 	uv sync
@@ -34,3 +35,6 @@ lock:
 
 download-weights:
 	uv run python download_weights.py
+
+interpret:
+	uv run python research/interpret.py

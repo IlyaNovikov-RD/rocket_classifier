@@ -219,10 +219,10 @@ rocket_classifier/              # Production inference package
 ├── schema.py                   # Pydantic v2 data contracts (TrajectoryPoint)
 ├── main.py                     # Inference pipeline: features → predict → submission.csv
 ├── app.py                      # Streamlit interactive demo
-├── interpret.py                # SHAP explainability (loads production model)
-└── visualize.py                # Physics feature visualization (demo.png)
+└── visualize.py                # Physics feature visualization
 
-research/                       # R&D scripts (Colab, not production)
+research/                       # R&D and model analysis scripts
+├── interpret.py                        # SHAP analysis — run via `make interpret` after new model
 ├── colab_brute_force_optimization.py   # Feature selection + 50-trial Optuna → 0.9995
 ├── colab_bayes_error_proof.py          # 5-part proof that 1.0 is impossible
 ├── colab_extended_lgbm_optuna.py       # 142 features + 100 trials + top-5 ensemble
@@ -258,7 +258,8 @@ ruff.toml                       # Linter/formatter config (target: py312)
 - **Apogee features** (`apogee_relative`, `apogee_time_frac`) — ballistic arc shape differs between rocket families
 
 ```bash
-uv run python -m rocket_classifier.interpret   # regenerates shap_summary.png
+make interpret   # regenerates assets/shap_summary.png and assets/interpretation_report.txt
+# Run this locally after deploying a new model
 ```
 
 ---
