@@ -2,7 +2,7 @@
 """Download production model artifacts from GitHub Release.
 
 Downloads model.pkl, train_medians.npy, and threshold_biases.npy from
-the v1.0.0 GitHub Release into the project root. Required before running
+the latest GitHub Release into weights/. Required before running
 the inference pipeline (``python -m rocket_classifier.main``).
 
 Usage:

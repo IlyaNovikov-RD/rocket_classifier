@@ -137,7 +137,7 @@ def load_model(
     medians_path = ROOT / "weights" / "train_medians.npy"
 
     if not model_path.exists():
-        msg = f"Model not found at {model_path}. Download from GitHub Release v1.0.0."
+        msg = f"Model not found at {model_path}. Run: make download-weights"
         raise FileNotFoundError(msg)
 
     clf = RocketClassifier.from_artifacts(model_path, medians_path)
