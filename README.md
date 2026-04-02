@@ -175,7 +175,8 @@ git clone https://github.com/IlyaNovikov-RD/rocket_classifier.git
 cd rocket_classifier
 uv sync
 
-# Run the full training pipeline (outputs submission.csv + model.pkl)
+# Run the inference pipeline (outputs submission.csv)
+# Requires model.pkl, train_medians.npy, threshold_biases.npy from GitHub Release
 uv run python -m rocket_classifier.main
 
 # Launch the interactive demo (opens localhost:8501)
@@ -207,34 +208,36 @@ The Dockerfile uses `COPY --from=ghcr.io/astral-sh/uv:latest` for a single-binar
 ## Project Structure
 
 ```
-rocket_classifier/          # Installable Python package
+rocket_classifier/              # Production inference package
 ├── __init__.py
-├── features.py             # 76 physics-derived features (velocity, jerk, apogee, ...)
-├── model.py                # XGBoost training pipeline (local) — production uses Colab-trained LightGBM
-├── schema.py               # Pydantic v2 data contracts (TrajectoryPoint)
-├── main.py                 # Pipeline orchestrator: load → validate → train → predict
-├── app.py                  # Streamlit interactive demo
-├── interpret.py            # SHAP explainability (shap_summary.png)
-└── visualize.py            # Physics feature visualization (demo.png)
+├── features.py                 # 76 physics features (velocity, jerk, apogee, ...)
+├── model.py                    # RocketClassifier — loads LightGBM, applies biases
+├── schema.py                   # Pydantic v2 data contracts (TrajectoryPoint)
+├── main.py                     # Inference pipeline: features → predict → submission.csv
+├── app.py                      # Streamlit interactive demo
+├── interpret.py                # SHAP explainability (loads production model)
+└── visualize.py                # Physics feature visualization (demo.png)
+
+research/                       # R&D scripts (Colab, not production)
+├── colab_brute_force_optimization.py   # Feature selection + 50-trial Optuna → 0.9995
+├── colab_bayes_error_proof.py          # 5-part proof that 1.0 is impossible
+├── colab_extended_lgbm_optuna.py       # 142 features + 100 trials + top-5 ensemble
+├── colab_sequence_model.py             # 1D-CNN on raw sequences (0.9431)
+└── colab_transformer_model.py          # Transformer on raw sequences (0.9588)
 
 tests/
-└── test_features.py        # 56 unit tests (derivatives, edge cases, key completeness)
+└── test_features.py            # 56 unit tests
 
 data/
-├── train.csv               # Labeled radar trajectories
-├── test.csv                # Unlabeled trajectories for inference
-└── sample_submission.csv   # Expected output format
+├── train.csv                   # Labeled radar trajectories
+├── test.csv                    # Unlabeled trajectories for inference
+└── sample_submission.csv       # Expected output format
 
-colab_brute_force_optimization.py  # Feature selection + 100-trial Optuna → 0.9995 model
-colab_bayes_error_proof.py         # 5-part proof that 1.0 is impossible on this data
-colab_sequence_model.py            # 1D-CNN on raw sequences (research, 0.9431)
-colab_transformer_model.py         # Transformer on raw sequences (research, 0.9588)
-colab_extended_lgbm_optuna.py      # 142 features + top-5 ensemble (research)
-pyproject.toml              # PEP 621 metadata, uv/hatchling build
-uv.lock                     # Deterministic dependency lockfile
-Dockerfile                  # Python 3.12-slim + uv
-Makefile                    # Developer automation
-ruff.toml                   # Linter/formatter config (target: py312)
+pyproject.toml                  # PEP 621 metadata, uv/hatchling build
+uv.lock                         # Deterministic dependency lockfile
+Dockerfile                      # Python 3.12-slim + uv
+Makefile                        # Developer automation
+ruff.toml                       # Linter/formatter config (target: py312)
 ```
 
 ---

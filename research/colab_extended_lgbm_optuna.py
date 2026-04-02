@@ -743,7 +743,7 @@ def main() -> None:
         "best_oob_mean": float(np.mean(best_fold_scores)),
         "best_oob_min": float(np.min(best_fold_scores)),
         "best_oob_fold_scores": best_fold_scores,
-        "used_ensemble": use_ensemble,
+        "used_ensemble": bool(use_ensemble),
         "biases": best_biases.tolist(),
         "train_raw": float(train_raw),
         "train_tuned": float(train_tuned),
