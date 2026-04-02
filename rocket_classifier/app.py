@@ -206,9 +206,8 @@ def classify(
     vec = np.array([feats.get(k, np.nan) for k in SELECTED_FEATURES], dtype=np.float32)
     X = vec.reshape(1, -1)
 
-    class_idx = int(clf.predict(X)[0])
-    proba = clf.predict_proba(X)[0]
-    return class_idx, proba
+    preds, proba = clf.predict_with_proba(X)
+    return int(preds[0]), proba[0]
 
 
 # ── Plotly 3D chart ────────────────────────────────────────────────────────────

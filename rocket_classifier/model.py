@@ -228,6 +228,24 @@ class RocketClassifier:
         X = self._select_and_impute(feature_df)
         return self.model.predict_proba(X)  # type: ignore[union-attr]
 
+    def predict_with_proba(self, feature_df: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Return threshold-tuned class predictions and raw probabilities in one pass.
+
+        Runs imputation and inference once, then derives both the bias-adjusted
+        class labels and the raw per-class probabilities from the same result.
+
+        Args:
+            feature_df: Array of shape (N, 61) with the selected features.
+
+        Returns:
+            A tuple of:
+                - preds: Integer array of shape (N,) with class labels in {0, 1, 2}.
+                - proba: Float array of shape (N, 3) with per-class probabilities.
+        """
+        proba = self.predict_proba(feature_df)
+        adjusted = np.log(proba + 1e-12) + self.biases
+        return np.argmax(adjusted, axis=1).astype(int), proba
+
     def predict(self, feature_df: np.ndarray) -> np.ndarray:
         """Return threshold-tuned class predictions.
 
