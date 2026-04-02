@@ -39,6 +39,9 @@ MEDIANS_PATH = WEIGHTS_DIR / "train_medians.npy"
 BIASES_PATH = WEIGHTS_DIR / "threshold_biases.npy"
 FEATURE_CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
 FEATURE_CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
+# Feather (Arrow IPC) is ~2x faster to read than Parquet for columnar data.
+# Written alongside Parquet on first build; used automatically when present.
+FEATURE_CACHE_TEST_FEATHER = CACHE_DIR / "cache_test_features.feather"
 
 
 # ---------------------------------------------------------------------------
@@ -61,10 +64,28 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.DataFrame:
-    """Return per-trajectory feature matrix, loading from cache if available."""
+    """Return per-trajectory feature matrix, loading from cache if available.
+
+    Prefers the Feather (Arrow IPC) sidecar file when present — ~2x faster
+    than Parquet for columnar reads. Falls back to Parquet, then rebuilds
+    from raw data if neither cache exists.
+    """
+    feather_path = cache_path.with_suffix(".feather")
+    if feather_path.exists():
+        logger.info("Loading %s features from Feather cache: %s", name, feather_path)
+        import pyarrow.feather as feather
+        return feather.read_table(str(feather_path)).to_pandas()
     if cache_path.exists():
-        logger.info("Loading %s features from cache: %s", name, cache_path)
-        return pd.read_parquet(cache_path)
+        logger.info("Loading %s features from Parquet cache: %s", name, cache_path)
+        df_feats = pd.read_parquet(cache_path)
+        # Write Feather sidecar for faster future reads
+        try:
+            import pyarrow.feather as feather
+            feather.write_feather(df_feats, str(feather_path), compression="lz4")
+            logger.info("Wrote Feather sidecar: %s", feather_path)
+        except Exception:
+            pass
+        return df_feats
     if df is None:
         raise FileNotFoundError(
             f"Cache not found at {cache_path} and no raw data provided. "
