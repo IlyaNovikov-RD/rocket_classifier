@@ -175,43 +175,47 @@ git clone https://github.com/IlyaNovikov-RD/rocket_classifier.git
 cd rocket_classifier
 uv sync
 
-# Download everything and run the full pipeline in one command (~20 MB download)
+# Full pipeline in one command — downloads ~20 MB from GitHub Release
 make pipeline
-# Equivalent to: download-all → run inference → regenerate SHAP assets
+# Runs: download-all → inference → SHAP regeneration
+# Output: outputs/submission.csv  +  updated assets/
 
 # Or step by step:
-make download-all    # model.pkl + medians + biases + feature caches
-make run             # inference pipeline → submission.csv
-make interpret       # SHAP plot + report → assets/
+make download-all    # → weights/ (model, medians, biases) + cache/ (parquet caches)
+make run             # → outputs/submission.csv
+make interpret       # → assets/shap_summary.png + assets/interpretation_report.txt
+make visualize       # → assets/demo.png  (only needed if features.py changes)
 
 # Launch the interactive demo (opens localhost:8501)
-uv run streamlit run rocket_classifier/app.py
+make demo
 ```
 
 ### Make Targets
 
 ```bash
-make install   # uv sync
-make test      # 56 unit tests
-make lint      # ruff check
-make format    # ruff format
-make demo      # streamlit demo
-make lock            # regenerate uv.lock
-make download-weights  # fetch model + medians + biases
-make download-all    # + feature caches (enables make run without data/)
-make run             # inference pipeline → submission.csv
-make interpret       # regenerate SHAP assets after model update
-make pipeline        # download-all + run + interpret (full local pipeline)
+make install          # uv sync
+make test             # 56 unit tests
+make lint             # ruff check
+make format           # ruff format
+make demo             # streamlit demo (localhost:8501)
+make lock             # regenerate uv.lock
+make download-weights # fetch weights/ from GitHub Release (model, medians, biases)
+make download-all     # + cache/ parquet caches (skips data/ recompute)
+make run              # inference pipeline → outputs/submission.csv
+make interpret        # regenerate assets/ SHAP artifacts after model update
+make visualize        # regenerate assets/demo.png after feature changes
+make pipeline         # download-all + run + interpret  (full end-to-end)
 ```
 
 ### Docker
 
 ```bash
 docker build -t rocket-classifier .
-docker run rocket-classifier
+docker run -v $(pwd)/outputs:/app/outputs rocket-classifier
+# outputs/submission.csv is written to your local outputs/ directory
 ```
 
-The Dockerfile uses `COPY --from=ghcr.io/astral-sh/uv:latest` for a single-binary uv install, then `uv sync --frozen --no-dev` for a reproducible build with no dependency resolution at build time.
+The Dockerfile downloads model artifacts from GitHub Release at build time — no data files needed. The container is fully self-contained.
 
 ---
 
