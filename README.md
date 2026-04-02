@@ -56,7 +56,7 @@ The problem is **tabular classification on physics-engineered features** — the
 - **Over Random Forest:** Sequential boosting focuses capacity on the ~33 hard borderline cases between classes 0 and 1.
 - **Over logistic regression / SVM:** Non-linear class boundaries require tree-based models.
 
-### Pipeline Overview
+### Model Development Pipeline (Research — Colab H100, one-time)
 
 ```
 Raw radar pings (x, y, z, t)
@@ -68,21 +68,34 @@ Feature Engineering ──► 76 physics features per trajectory
 Feature Selection ──► 61 features (backward elimination, -15 noise features)
     │
     ▼
-LightGBM (multiclass, softprob) ──► 3-class probability estimates
+LightGBM + 100-trial Optuna (GPU) ──► optimised hyperparameters
     │
     ▼
-OOB Threshold Tuning ──► bias-adjusted predictions optimised for min-recall
+10-fold GroupKFold OOB Threshold Tuning ──► biases [0, 1.063, 2.177]
     │
     ▼
-submission.csv
+weights/model.pkl  ·  weights/train_medians.npy  ·  weights/threshold_biases.npy
 ```
 
-The pipeline has four stages, each addressing a different challenge:
+### Production Inference Pipeline (`make run`)
 
-1. **Feature engineering** converts variable-length radar sequences into fixed-size vectors encoding the physics of each rocket type.
-2. **Feature selection** drops 15 noise features via importance-ranked backward elimination, improving minority-class recall.
-3. **LightGBM with softprob** learns deep non-linear boundaries and outputs calibrated probabilities.
-4. **Threshold tuning** post-processes probabilities with per-class biases to directly optimise the min-recall metric.
+```
+cache/cache_train_features.parquet   (pre-computed 76-feature matrix)
+    │
+    ▼
+Select 61 production features + impute NaN with train_medians
+    │
+    ▼
+weights/model.pkl  ──►  LightGBM.predict_proba()
+    │
+    ▼
+log(proba) + biases [0, 1.063, 2.177]  ──►  argmax
+    │
+    ▼
+outputs/submission.csv
+```
+
+The model development pipeline ran once on Colab to produce the artifacts stored in the GitHub Release. The production pipeline loads those artifacts and runs in seconds — no training, no feature engineering recomputation.
 
 ---
 
