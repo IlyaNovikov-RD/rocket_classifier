@@ -2,7 +2,7 @@
 name = "rocket-classifier"
 version = "1.0.0"
 description = "Production-grade rocket trajectory classifier"
-authors = [{name = "Data Engineer"}]
+authors = [{name = "Ilya Novikov"}]
 requires-python = "==3.12.*"
 dependencies = [
     "pandas>=2.0",
