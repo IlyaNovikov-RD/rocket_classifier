@@ -243,7 +243,7 @@ After the first run, feature matrices are written to `cache/*.parquet` (portable
 | **Demo** | Streamlit, Plotly | Real-time 3D trajectory visualization |
 | **Package management** | [uv](https://docs.astral.sh/uv/) | Deterministic lockfile, 10-100x faster than pip/poetry |
 | **Container** | Docker (python:3.12-slim + uv) | Reproducible builds, no resolver in CI |
-| **CI** | GitHub Actions | Ruff lint + 85 pytest tests on every push/PR |
+| **CI** | GitHub Actions | Ruff lint + 88 pytest tests on every push/PR |
 | **Caching** | Parquet + Feather (Arrow IPC) | Feature matrices cached to disk; Feather is 2x faster to read than Parquet |
 
 ---
@@ -291,7 +291,7 @@ make demo
 
 ```bash
 make install          # uv sync
-make test             # 85 unit tests
+make test             # 88 unit tests
 make lint             # ruff check
 make format           # ruff format
 make demo             # streamlit demo (localhost:8501)
