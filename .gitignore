@@ -23,7 +23,7 @@ data/
 cache/
 *.parquet
 
-# ── Model artifacts (served from GitHub Release v1.0.0) ──────────────────────
+# ── Model artifacts (served from latest GitHub Release) ──────────────────────
 # Download with: make download-weights
 weights/
 

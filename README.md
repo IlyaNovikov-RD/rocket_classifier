@@ -159,7 +159,7 @@ Three layers:
 | **Demo** | Streamlit, Plotly | Real-time 3D trajectory visualization |
 | **Package management** | [uv](https://docs.astral.sh/uv/) | Deterministic lockfile, 10-100x faster than pip/poetry |
 | **Container** | Docker (python:3.12-slim + uv) | Reproducible builds, no resolver in CI |
-| **CI** | GitHub Actions | Ruff lint + 56 pytest tests on every push/PR |
+| **CI** | GitHub Actions | Ruff lint + 85 pytest tests on every push/PR |
 | **Caching** | Parquet | Feature matrices cached to disk; reloads in <1s vs ~96s to recompute |
 
 ---
@@ -207,7 +207,7 @@ make demo
 
 ```bash
 make install          # uv sync
-make test             # 56 unit tests
+make test             # 85 unit tests
 make lint             # ruff check
 make format           # ruff format
 make demo             # streamlit demo (localhost:8501)
@@ -241,8 +241,7 @@ rocket_classifier/              # Production inference package
 ├── model.py                    # RocketClassifier — loads LightGBM, applies biases
 ├── schema.py                   # Pydantic v2 data contracts (TrajectoryPoint)
 ├── main.py                     # Inference pipeline: features → predict → submission.csv
-├── app.py                      # Streamlit interactive demo
-└── visualize.py                # Physics feature visualization
+└── app.py                      # Streamlit interactive demo
 
 research/                       # R&D and model analysis scripts
 ├── interpret.py                        # SHAP analysis — run via `make interpret` after new model
@@ -254,7 +253,9 @@ research/                       # R&D and model analysis scripts
 └── colab_transformer_model.py          # Transformer on raw sequences (0.9588)
 
 tests/
-└── test_features.py            # 56 unit tests
+├── test_features.py            # Feature engineering unit tests
+├── test_model.py               # RocketClassifier + min_class_recall unit tests
+└── test_schema.py              # Schema validation unit tests
 
 data/
 ├── train.csv                   # Labeled radar trajectories
@@ -287,7 +288,7 @@ download_weights.py             # Downloads weights/ + cache/ from GitHub Releas
 
 ![SHAP Feature Importance](assets/shap_summary.png)
 
-`rocket_classifier/interpret.py` computes exact SHAP values via `TreeExplainer` on a 500-trajectory test sample. Top discriminators:
+`research/interpret.py` computes exact SHAP values via `TreeExplainer` on a 500-trajectory test sample. Top discriminators:
 
 - **Launch position** (`launch_x`, `launch_z`) — geography clusters by threat group
 - **Horizontal speed** (`v_horiz_median`) — muzzle velocity is propellant-charge dependent
