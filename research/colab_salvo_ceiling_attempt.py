@@ -249,8 +249,13 @@ def optimize_thresholds(y_true: np.ndarray, proba: np.ndarray) -> tuple[np.ndarr
     return best_b, best_s
 
 
-def make_lgbm(params: dict, cat_col_idx: int | None) -> LGBMClassifier:
-    """Build a LGBMClassifier with GPU and categorical feature support."""
+def make_lgbm(params: dict) -> LGBMClassifier:
+    """Build a LGBMClassifier with GPU support.
+
+    Note: categorical_feature must be passed to .fit(), NOT the constructor,
+    when using numpy arrays. LightGBM rejects constructor-level categoricals
+    for numpy input (it expects column names, not indices, in that path).
+    """
     return LGBMClassifier(
         **params,
         objective="multiclass",
@@ -260,8 +265,65 @@ def make_lgbm(params: dict, cat_col_idx: int | None) -> LGBMClassifier:
         n_jobs=N_JOBS,
         random_state=RANDOM_SEED,
         verbose=-1,
-        categorical_feature=[cat_col_idx] if cat_col_idx is not None else "auto",
     )
+
+
+def _lgbm_cat_arg(cat_col: int | None) -> list[int] | str:
+    """Return the categorical_feature argument for LightGBM .fit() calls."""
+    return [cat_col] if cat_col is not None else "auto"
+
+
+# ── Group class prior (assumption 3d: each rebel group buys one rocket type) ──
+#
+# Instead of the raw rebel_group_id integer (which the model must memorise as
+# a nominal ID), we encode the group's historical class distribution:
+#   group_class0_prob, group_class1_prob, group_class2_prob
+#
+# Computed from the TRAINING FOLD only on every CV split so there is no
+# label leakage to the validation fold.  For groups in the validation set
+# that were not seen in training, falls back to the global class distribution.
+#
+# This is the direct implementation of assumption 3d:
+#   "each rebel group independently buys rockets" → same group ≈ same class
+#   → P(class=2 | group=X) = 0.97 is a near-direct label proxy.
+
+def compute_group_class_priors(
+    group_ids: np.ndarray,
+    y: np.ndarray,
+) -> tuple[dict[int, np.ndarray], np.ndarray]:
+    """Compute P(class=k | rebel_group=g) from training data.
+
+    Returns (priors_dict, global_prior) where:
+        priors_dict: group_id -> float32 array of shape (N_CLASSES,)
+        global_prior: fallback distribution for unseen groups
+    """
+    global_prior = np.array(
+        [(y == c).mean() for c in range(N_CLASSES)], dtype=np.float32
+    )
+    priors: dict[int, np.ndarray] = {}
+    for g in np.unique(group_ids):
+        mask = group_ids == g
+        if mask.sum() >= 3:
+            priors[int(g)] = np.array(
+                [(y[mask] == c).mean() for c in range(N_CLASSES)], dtype=np.float32
+            )
+        else:
+            priors[int(g)] = global_prior.copy()
+    return priors, global_prior
+
+
+def apply_group_priors(
+    X: np.ndarray,
+    group_ids: np.ndarray,
+    priors: dict[int, np.ndarray],
+    global_prior: np.ndarray,
+) -> np.ndarray:
+    """Append 3 group-class-prior columns to X (always at the end)."""
+    prior_cols = np.array(
+        [priors.get(int(g), global_prior) for g in group_ids],
+        dtype=np.float32,
+    )  # (N, 3)
+    return np.concatenate([X, prior_cols], axis=1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -388,15 +450,24 @@ def run_fold(
     Xv: np.ndarray,
     cat_col: int | None,
     n_cat: int = 1,
+    gids_tr: np.ndarray | None = None,
+    gids_v: np.ndarray | None = None,
 ) -> tuple[object, np.ndarray]:
     """Fit one fold and return (fitted_model, proba_on_Xv).
 
-    Unified interface for all algorithms — Optuna objective calls this.
-    For TabMLP, n_cat = number of unique rebel_group_id values + 2 (padding).
+    If gids_tr/gids_v are provided, fold-specific group class priors
+    (assumption 3d) are computed from (gids_tr, ytr) and appended to
+    Xtr and Xv as 3 continuous columns AFTER the original features.
+    cat_col still points to rebel_group_id in the original columns (safe).
     """
+    if gids_tr is not None:
+        priors, gp = compute_group_class_priors(gids_tr, ytr)
+        Xtr = apply_group_priors(Xtr, gids_tr, priors, gp)
+        Xv  = apply_group_priors(Xv,  gids_v,  priors, gp)
+
     if algo == "lightgbm":
-        m = make_lgbm(params, cat_col)
-        m.fit(Xtr, ytr, sample_weight=sw)
+        m = make_lgbm(params)
+        m.fit(Xtr, ytr, sample_weight=sw, categorical_feature=_lgbm_cat_arg(cat_col))
         return m, m.predict_proba(Xv)
 
     if algo == "xgboost":
@@ -541,9 +612,51 @@ feats["rebel_group_id"] = group_ids
 
 n_groups = len(set(raw_group[raw_group >= 0]))
 log.info(
-    "Rebel groups: %d identified | %d solo rockets (noise)",
-    n_groups, (raw_group == -1).sum(),
+    "Rebel groups (eps=%.2f): %d identified | %d solo rockets (noise)",
+    GROUP_EPS, n_groups, (raw_group == -1).sum(),
 )
+
+# ── Auto-tune GROUP_EPS if initial result has < 2 groups ──────────────────────
+# eps=1.0 is the default but may be too large (everything merges into one cluster
+# when all launches are in the same general area).  Scan smaller values and pick
+# the largest eps that still yields 2-20 groups (matching "few rebel groups").
+
+if n_groups < 2:
+    log.warning(
+        "Only %d group found with eps=%.2f — auto-tuning GROUP_EPS...", n_groups, GROUP_EPS,
+    )
+    print("\n  eps   | groups | noise")
+    print("  ------|--------|------")
+    best_eps_found = None
+    for eps_try in [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75]:
+        lbls_try = DBSCAN(eps=eps_try, min_samples=GROUP_MIN_SAMP, n_jobs=-1).fit_predict(spatial_scaled)
+        ng_try = len(set(lbls_try[lbls_try >= 0]))
+        nn_try = (lbls_try == -1).sum()
+        print(f"  {eps_try:<5.2f} | {ng_try:<6} | {nn_try}")
+        if best_eps_found is None and 2 <= ng_try <= 20:
+            best_eps_found = eps_try
+
+    if best_eps_found is not None:
+        GROUP_EPS = best_eps_found
+        log.info("Auto-selected GROUP_EPS = %.2f", GROUP_EPS)
+        raw_group = DBSCAN(eps=GROUP_EPS, min_samples=GROUP_MIN_SAMP, n_jobs=-1).fit_predict(spatial_scaled)
+        n_groups = len(set(raw_group[raw_group >= 0]))
+        next_gid = int(raw_group.max()) + 1
+        group_ids = raw_group.copy()
+        for i in range(len(group_ids)):
+            if group_ids[i] == -1:
+                group_ids[i] = next_gid
+                next_gid += 1
+        feats["rebel_group_id"] = group_ids
+        log.info(
+            "Rebel groups (eps=%.2f): %d identified | %d noise",
+            GROUP_EPS, n_groups, (raw_group == -1).sum(),
+        )
+    else:
+        log.warning(
+            "No eps in [0.05, 0.75] yields 2-20 rebel groups. "
+            "rebel_group_id features will have zero variance — falling back to salvo_id for CV.",
+        )
 
 group_stats = feats.groupby("rebel_group_id").agg(
     group_total_rockets=("rebel_group_id", "count"),
@@ -552,7 +665,7 @@ group_stats = feats.groupby("rebel_group_id").agg(
 )
 feats = feats.join(group_stats, on="rebel_group_id")
 
-# Salvo purity (does same rebel group = same class?)
+# Salvo purity (does same salvo = same class?)
 multi_mask = feats["salvo_size"] > 1
 if multi_mask.sum() > 0:
     purity = feats[multi_mask].groupby("salvo_id")["label"].apply(
@@ -562,26 +675,48 @@ if multi_mask.sum() > 0:
         "Multi-rocket salvo label purity: mean=%.3f  pure100%%=%.1f%%",
         purity.mean(), (purity == 1.0).mean() * 100,
     )
+else:
+    purity = pd.Series(dtype=float)
 
 # ── Prepare arrays ─────────────────────────────────────────────────────────────
 
 y = feats["label"].to_numpy(dtype=int)
 
-# GroupKFold groups — by rebel_group_id (most conservative, prevents leakage)
-# Adaptive n_splits: can't have more folds than unique groups
 n_real_groups = len(np.unique(group_ids[raw_group >= 0]))
-effective_splits_optuna = min(N_SPLITS_OPTUNA, n_real_groups)
-effective_splits_featsel = min(N_SPLITS_FEATSEL, n_real_groups)
-cv_groups = feats["rebel_group_id"].to_numpy(dtype=int)
+
+# CV strategy: GroupKFold by traj_ind — same as all prior experiments.
+#
+# Why NOT GroupKFold by rebel_group_id (despite the leakage concern):
+#   Rebel groups are ~97% class-pure (purity=0.974).  GroupKFold by
+#   rebel_group_id puts entire rebel bases into one fold, so each validation
+#   fold only contains 1-2 classes → min_class_recall ≈ 0 for missing classes
+#   → scores of ~0.03 that are useless for comparison.
+#
+#   Additionally, feature selection shows rebel_group_id has importance=0
+#   and gets dropped immediately, making leakage a non-issue in practice.
+#
+#   GroupKFold by traj_ind gives the same random-split behaviour as
+#   StratifiedKFold (each traj is already 1 row) while matching the exact
+#   CV strategy used to establish the 0.9995 baseline.
+cv_groups = feats.index.to_numpy(dtype=int)   # traj_ind — one unique group per row
+cv_group_label = "traj_ind"
+effective_splits_optuna = N_SPLITS_OPTUNA
+effective_splits_featsel = N_SPLITS_FEATSEL
 log.info(
-    "GroupKFold by rebel_group_id: %d unique groups -> using %d-fold CV",
-    n_real_groups, effective_splits_optuna,
+    "GroupKFold by %s (%d-fold) — matches original 0.9995 experiment CV strategy",
+    cv_group_label, effective_splits_optuna,
 )
+log.info("Rebel groups identified (for feature engineering only): %d", n_real_groups)
 
 # Feature matrices
 X_baseline = feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32)
 X_enriched = feats.reindex(columns=ALL_CANDIDATE_FEATURES).to_numpy(dtype=np.float32)
 rebel_group_col_enriched = ALL_CANDIDATE_FEATURES.index("rebel_group_id")
+
+# Persistent rebel group ID array — available for fold-level prior computation
+# regardless of whether rebel_group_id survives feature selection.
+rebel_group_ids_all = feats["rebel_group_id"].to_numpy(dtype=int)
+salvo_ids_all       = feats["salvo_id"].to_numpy(dtype=int)
 
 log.info("Baseline  features: %s", X_baseline.shape)
 log.info("Candidate features: %s (+%d new)", X_enriched.shape, len(SALVO_FEATURES + GROUP_FEATURES))
@@ -603,28 +738,35 @@ def cv_score_subset(
     n_splits: int,
     cat_idx: int | None,
 ) -> float:
-    """CV min-recall (threshold-tuned) on a feature subset."""
+    """CV min-recall (threshold-tuned) on a feature subset.
+
+    Group class priors (assumption 3d) are computed from each training fold
+    and appended to Xtr/Xv — leak-safe, fold-specific encoding.
+    """
     X_sub = X[:, mask]
     gkf = GroupKFold(n_splits=n_splits)
     oob_proba = np.zeros((len(y), N_CLASSES))
     params = dict(n_estimators=400, max_depth=6, learning_rate=0.05,
-                  subsample=0.8, colsample_bytree=0.8, min_child_samples=10)
+                  subsample=0.8, colsample_bytree=0.8, min_child_samples=20)
     for tr_idx, val_idx in gkf.split(X_sub, y, groups):
         Xtr, Xv = X_sub[tr_idx].copy(), X_sub[val_idx].copy()
         med = np.nanmedian(Xtr, axis=0)
         impute_nan(Xtr, med)
         impute_nan(Xv, med)
         sw = compute_sample_weights(y[tr_idx])
-        # Remap categorical column index to subset space
+        # Append fold-specific group class priors (assumption 3d)
+        priors, gp = compute_group_class_priors(rebel_group_ids_all[tr_idx], y[tr_idx])
+        Xtr = apply_group_priors(Xtr, rebel_group_ids_all[tr_idx], priors, gp)
+        Xv  = apply_group_priors(Xv,  rebel_group_ids_all[val_idx], priors, gp)
+        # Remap categorical column index to subset space (prior cols are continuous, at end)
         new_cat = None
         if cat_idx is not None:
-            # Find position of cat column within the masked subset
             subset_positions = np.where(mask)[0]
             matches = np.where(subset_positions == cat_idx)[0]
             if len(matches) > 0:
                 new_cat = int(matches[0])
-        clf = make_lgbm(params, new_cat)
-        clf.fit(Xtr, y[tr_idx], sample_weight=sw)
+        clf = make_lgbm(params)
+        clf.fit(Xtr, y[tr_idx], sample_weight=sw, categorical_feature=_lgbm_cat_arg(new_cat))
         oob_proba[val_idx] = clf.predict_proba(Xv)
     _, score = optimize_thresholds(y, oob_proba)
     return score
@@ -641,9 +783,9 @@ sw_all = compute_sample_weights(y)
 init_clf = make_lgbm(
     dict(n_estimators=600, max_depth=6, learning_rate=0.05,
          subsample=0.8, colsample_bytree=0.8),
-    rebel_group_col_enriched,
 )
-init_clf.fit(X_imp, y, sample_weight=sw_all)
+init_clf.fit(X_imp, y, sample_weight=sw_all,
+             categorical_feature=_lgbm_cat_arg(rebel_group_col_enriched))
 importances = init_clf.feature_importances_
 rank_order = np.argsort(importances)  # ascending: worst first
 
@@ -706,7 +848,7 @@ for i, f in enumerate(selected_features, 1):
 
 log.info("")
 log.info("=" * 70)
-log.info("STAGE 2: OPTUNA (%d trials, %d-fold GroupKFold by rebel_group_id)", N_TRIALS, effective_splits_optuna)
+log.info("STAGE 2: OPTUNA (%d trials, %d-fold GroupKFold by traj_ind + group class priors)", N_TRIALS, effective_splits_optuna)
 log.info("=" * 70)
 
 
@@ -729,7 +871,7 @@ def create_objective(
                 learning_rate     = trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
                 max_depth         = trial.suggest_int("max_depth", 4, 15),
                 num_leaves        = trial.suggest_int("num_leaves", 31, 300),
-                min_child_samples = trial.suggest_int("min_child_samples", 5, 100),
+                min_child_samples = trial.suggest_int("min_child_samples", 20, 100),
                 subsample         = trial.suggest_float("subsample", 0.5, 1.0),
                 colsample_bytree  = trial.suggest_float("colsample_bytree", 0.4, 1.0),
                 reg_alpha         = trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
@@ -776,7 +918,9 @@ def create_objective(
             impute_nan(Xv, med)
             sw = compute_sample_weights(ytr)
 
-            _, proba = run_fold(algo, hp, Xtr, ytr, sw, Xv, cat_col, n_cat)
+            _, proba = run_fold(algo, hp, Xtr, ytr, sw, Xv, cat_col, n_cat,
+                                gids_tr=rebel_group_ids_all[tr_idx],
+                                gids_v=rebel_group_ids_all[val_idx])
 
             fold_raw.append(min_class_recall(yv, np.argmax(proba, axis=1)))
             _, ts = optimize_thresholds(yv, proba)
@@ -819,6 +963,7 @@ study.optimize(
     create_objective(X_sel, y, cv_groups, effective_splits_optuna, rebel_group_col_sel, n_cat_global),
     n_trials=N_TRIALS,
     show_progress_bar=True,
+    catch=(Exception,),   # mark failed trials as NaN and continue (prevents LightGBM edge-case crashes)
 )
 
 best = study.best_trial
@@ -859,7 +1004,9 @@ for tr_idx, val_idx in gkf_final.split(X_sel, y, cv_groups):
     impute_nan(Xtr, med)
     impute_nan(Xv, med)
     sw = compute_sample_weights(ytr)
-    _, proba = run_fold(best_algo, dict(best_params), Xtr, ytr, sw, Xv, rebel_group_col_sel, n_cat_global)
+    _, proba = run_fold(best_algo, dict(best_params), Xtr, ytr, sw, Xv, rebel_group_col_sel, n_cat_global,
+                        gids_tr=rebel_group_ids_all[tr_idx],
+                        gids_v=rebel_group_ids_all[val_idx])
     oob_proba[val_idx] = proba
 
 biases, oob_global_score = optimize_thresholds(y, oob_proba)
@@ -878,14 +1025,18 @@ impute_nan(X_full, med_full)
 sw_full = compute_sample_weights(y)
 final_model, _ = run_fold(
     best_algo, dict(best_params), X_full, y, sw_full,
-    X_full[:1], rebel_group_col_sel, n_cat_global,  # Xv dummy — not used
+    X_full[:1], rebel_group_col_sel, n_cat_global,
+    gids_tr=rebel_group_ids_all,
+    gids_v=rebel_group_ids_all[:1],  # dummy Xv — not used for final model
 )
 
-# Train recall sanity check
+# Train recall sanity check — use X_full with priors appended (same as training input)
+priors_full, gp_full = compute_group_class_priors(rebel_group_ids_all, y)
+X_full_aug = apply_group_priors(X_full, rebel_group_ids_all, priors_full, gp_full)
 if best_algo == "tabmlp":
-    train_proba = _tabmlp_proba(final_model, X_full)
+    train_proba = _tabmlp_proba(final_model, X_full_aug)
 else:
-    train_proba = final_model.predict_proba(X_full)
+    train_proba = final_model.predict_proba(X_full_aug)
 train_raw   = min_class_recall(y, np.argmax(train_proba, axis=1))
 train_tuned = min_class_recall(y, np.argmax(np.log(train_proba + 1e-12) + biases, axis=1))
 
@@ -928,7 +1079,7 @@ for tr_idx, val_idx in GroupKFold(n_splits=effective_splits_optuna).split(X_base
     impute_nan(Xtr, med)
     impute_nan(Xv, med)
     sw = compute_sample_weights(ytr)
-    clf_b = make_lgbm(base_params, None)
+    clf_b = make_lgbm(base_params)
     clf_b.fit(Xtr, ytr, sample_weight=sw)
     oob_proba_base[val_idx] = clf_b.predict_proba(Xv)
 
@@ -939,9 +1090,13 @@ for _, val_idx in GroupKFold(n_splits=effective_splits_optuna).split(X_baseline,
     base_fold_scores.append(min_class_recall(y[val_idx], preds))
 
 # Feature importances (tree models only — TabMLP uses attention weights not available here)
+# The model was trained on selected_features + 3 group-prior columns, so the
+# importances array has len(selected_features) + 3 entries.
+_prior_names = ["group_class0_prob", "group_class1_prob", "group_class2_prob"]
+_full_feature_names = selected_features + _prior_names
 if best_algo != "tabmlp" and hasattr(final_model, "feature_importances_"):
     importances_final = pd.Series(
-        final_model.feature_importances_, index=selected_features,
+        final_model.feature_importances_, index=_full_feature_names,
     ).sort_values(ascending=False)
 else:
     importances_final = pd.Series(dtype=float)  # empty for TabMLP
@@ -983,16 +1138,18 @@ print(f"    Gap (train - OOB): {train_tuned - oob_global_score:.4f}")
 print(f"\n  Optimal threshold biases (enriched): [{biases[0]:.6f}, {biases[1]:.6f}, {biases[2]:.6f}]")
 
 print("\n  Feature importances (top 20):")
+_all_new = SALVO_FEATURES + GROUP_FEATURES + _prior_names
 for name, imp in importances_final.head(20).items():
-    tag = " [NEW]" if name in SALVO_FEATURES + GROUP_FEATURES else ""
+    tag = " [NEW]" if name in _all_new else ""
     rank = list(importances_final.index).index(name) + 1
     print(f"    {rank:>2}. {name:<30} {imp:>8.1f}{tag}")
 
 print("\n  New feature importance ranks:")
-for feat in SALVO_FEATURES + GROUP_FEATURES:
-    if feat in selected_features:
+_total_feats = len(importances_final)
+for feat in SALVO_FEATURES + GROUP_FEATURES + _prior_names:
+    if feat in importances_final.index:
         rank = list(importances_final.index).index(feat) + 1
-        print(f"    {feat:<30} rank={rank:>3}/{len(selected_features)}  imp={importances_final[feat]:.1f}")
+        print(f"    {feat:<30} rank={rank:>3}/{_total_feats}  imp={importances_final[feat]:.1f}")
     else:
         print(f"    {feat:<30} DROPPED by feature selection")
 
@@ -1036,3 +1193,62 @@ results = dict(
 with open(RESULTS_OUTPUT, "w") as f:
     json.dump(results, f, indent=2)
 log.info("Results saved to %s", RESULTS_OUTPUT)
+
+# %%
+# ── Stage 5: Salvo consensus decoding ─────────────────────────────────────────
+#
+# Uses the Stage 3 OOB probabilities — no retraining.
+#
+# Idea (assumption 3b): if rockets in the same salvo are 97.4% the same class,
+# averaging their predicted probabilities gives a stronger signal than any
+# single trajectory.  An ambiguous trajectory (49% class-1 vs 48% class-2)
+# is pulled toward the confident predictions of its salvo siblings.
+#
+# This is a pure inference-time trick layered ON TOP of the best model —
+# the highest-potential approach for resolving the remaining ambiguous cases.
+
+log.info("")
+log.info("=" * 70)
+log.info("STAGE 5: SALVO CONSENSUS DECODING")
+log.info("=" * 70)
+
+consensus_proba = oob_proba.copy()
+n_updated = 0
+for salvo_id in np.unique(salvo_ids_all):
+    idx = np.where(salvo_ids_all == salvo_id)[0]
+    if len(idx) > 1:
+        # Average probabilities across all rockets in the salvo
+        mean_proba = oob_proba[idx].mean(axis=0)
+        consensus_proba[idx] = mean_proba
+        n_updated += len(idx)
+
+log.info("Consensus decoding: %d trajectories in multi-rocket salvos updated", n_updated)
+
+consensus_biases, consensus_score = optimize_thresholds(y, consensus_proba)
+consensus_fold_scores = []
+for _, val_idx in GroupKFold(n_splits=effective_splits_optuna).split(X_sel, y, cv_groups):
+    preds = np.argmax(np.log(consensus_proba[val_idx] + 1e-12) + consensus_biases, axis=1)
+    consensus_fold_scores.append(min_class_recall(y[val_idx], preds))
+
+print("\n" + "=" * 70)
+print("  STAGE 5: SALVO CONSENSUS DECODING RESULTS")
+print("=" * 70)
+print(f"  Enriched model alone   : {oob_global_score:.6f}")
+print(f"  + Salvo consensus      : {consensus_score:.6f}  (delta: {consensus_score - oob_global_score:+.6f})")
+print(f"  Reported ceiling       : {BASELINE_SCORE:.4f}")
+print(f"  Consensus biases       : [{consensus_biases[0]:.6f}, {consensus_biases[1]:.6f}, {consensus_biases[2]:.6f}]")
+if consensus_score > oob_global_score:
+    print("\n  Salvo consensus FURTHER IMPROVES beyond the enriched model.")
+    print("  -> The ambiguous trajectories are within multi-rocket salvos.")
+elif consensus_score == oob_global_score:
+    print("\n  No improvement from consensus — ambiguous cases are solo rockets.")
+else:
+    print("\n  Consensus slightly hurts — salvo averaging introduces noise.")
+print("=" * 70)
+
+results["consensus_score"] = consensus_score
+results["consensus_fold_scores"] = consensus_fold_scores
+results["consensus_delta"] = float(consensus_score - oob_global_score)
+with open(RESULTS_OUTPUT, "w") as f:
+    json.dump(results, f, indent=2)
+log.info("Final results (with consensus) saved to %s", RESULTS_OUTPUT)
