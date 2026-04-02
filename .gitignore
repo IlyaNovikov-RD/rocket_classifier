@@ -1,15 +1,39 @@
-data/
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+
+# ── Environments ──────────────────────────────────────────────────────────────
 .venv/
-*.parquet
-.DS_Store
+.env
+
+# ── Lock files (uv.lock is tracked; poetry.lock is not) ──────────────────────
 poetry.lock
 
-# Model artifacts (stored in GitHub Release, not in repo)
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Data (large CSVs, not tracked) ───────────────────────────────────────────
+data/
+
+# ── Feature caches (large Parquet files, regenerated from data/) ──────────────
+*.parquet
+
+# ── Model artifacts (served from GitHub Release v1.0.0) ──────────────────────
+# Download with: make download-weights
 model.pkl
 train_medians.npy
 threshold_biases.npy
+
+# ── Pipeline outputs ──────────────────────────────────────────────────────────
 submission.csv
 
-# Downloaded Colab artifacts
+# ── Local experiment artifacts ────────────────────────────────────────────────
 colab_brute_force_results/
+
+# ── Personal / IDE files ──────────────────────────────────────────────────────
+.claude/
+*.pdf

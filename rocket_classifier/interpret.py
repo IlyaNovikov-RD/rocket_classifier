@@ -44,7 +44,7 @@ DATA_DIR = ROOT / "data"
 CACHE_TRAIN = ROOT / "cache_train_features.parquet"
 CACHE_TEST = ROOT / "cache_test_features.parquet"
 SHAP_PLOT_PATH = ROOT / "assets" / "shap_summary.png"
-REPORT_PATH = ROOT / "interpretation_report.txt"
+REPORT_PATH = ROOT / "assets" / "interpretation_report.txt"
 
 # Friendly display names for each feature group (for the report)
 _FEATURE_CONTEXT: dict[str, str] = {
