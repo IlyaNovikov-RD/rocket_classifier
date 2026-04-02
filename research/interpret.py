@@ -3,13 +3,13 @@ Model interpretability via SHAP (SHapley Additive exPlanations).
 
 Workflow:
   1. Load pre-computed feature matrices from Parquet cache (or rebuild from raw CSV).
-  2. Train the XGBoost model on the full training set.
+  2. Load the production LightGBM model via RocketClassifier.
   3. Compute SHAP values using TreeExplainer (exact, no sampling approximation).
-  4. Generate shap_summary.png — mean |SHAP| bar chart across all rocket classes.
-  5. Write interpretation_report.txt — ranked feature importance with physical context.
+  4. Generate assets/shap_summary.png — mean |SHAP| bar chart across all rocket classes.
+  5. Write assets/interpretation_report.txt — ranked feature importance with physical context.
 
 Why TreeExplainer?
-  XGBoost's tree structure allows exact SHAP computation in O(TLD) time
+  LightGBM's tree structure allows exact SHAP computation in O(TLD) time
   (T=trees, L=leaves, D=depth), making it orders of magnitude faster than
   KernelExplainer and producing exact, not approximate, Shapley values.
 """
@@ -157,7 +157,7 @@ def compute_shap(
     an explicit background dataset, giving exact Shapley values without the
     O(n_background x n_explain) cost of interventional mode.
 
-    For multi-class XGBoost, TreeExplainer returns a list of arrays
+    For multi-class LightGBM, TreeExplainer returns a list of arrays
     (one per class), each shaped (n_samples, n_features).
 
     Returns:
