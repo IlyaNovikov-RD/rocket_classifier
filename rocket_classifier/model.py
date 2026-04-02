@@ -23,7 +23,6 @@ import logging
 import os
 from pathlib import Path
 
-import joblib
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -75,7 +74,7 @@ class _ONNXBackend:
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         return self._session.run(  # type: ignore[union-attr]
-            ["probabilities"], {self._input_name: X.astype(np.float32)}
+            ["probabilities"], {self._input_name: X.astype(np.float32, copy=False)}
         )[0]
 
 
@@ -195,6 +194,7 @@ class RocketClassifier:
             backend_name = f"native LightGBM ({lgb_path.name})"
 
         if model is None:
+            import joblib  # lazy: only needed for legacy .pkl fallback
             model = joblib.load(str(pkl_path))
             backend_name = f"joblib ({pkl_path.name})"
 
