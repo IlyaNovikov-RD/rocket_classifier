@@ -22,7 +22,9 @@ RELEASE_BASE = (
 )
 
 ARTIFACTS = [
-    "model.pkl",
+    "model.onnx",           # fastest inference backend (preferred)
+    "model.lgb",            # native LightGBM fallback
+    "model.pkl",            # legacy joblib fallback
     "train_medians.npy",
     "threshold_biases.npy",
 ]
