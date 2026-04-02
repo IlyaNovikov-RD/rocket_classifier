@@ -14,9 +14,10 @@
 #   make download-all      Download model artifacts + feature caches from GitHub Release
 #   make run               Run inference pipeline → submission.csv
 #   make interpret         Regenerate SHAP plot + report after a new model is deployed
+#   make visualize         Regenerate demo.png (physics feature visualization)
 #   make pipeline          Full local pipeline: download-all → run → interpret
 
-.PHONY: install test lint format demo lock download-weights download-all run interpret pipeline
+.PHONY: install test lint format demo lock download-weights download-all run interpret visualize pipeline
 
 install:
 	uv sync
@@ -47,6 +48,9 @@ run:
 
 interpret:
 	uv run python research/interpret.py
+
+visualize:
+	uv run python research/visualize.py
 
 pipeline: download-all run interpret
 	@echo "Pipeline complete. submission.csv and assets/ are up to date."

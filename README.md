@@ -229,6 +229,7 @@ rocket_classifier/              # Production inference package
 
 research/                       # R&D and model analysis scripts
 ├── interpret.py                        # SHAP analysis — run via `make interpret` after new model
+├── visualize.py                        # Physics feature demo plot — run via `make visualize`
 ├── colab_brute_force_optimization.py   # Feature selection + 50-trial Optuna → 0.9995
 ├── colab_bayes_error_proof.py          # 5-part proof that 1.0 is impossible
 ├── colab_extended_lgbm_optuna.py       # 142 features + 100 trials + top-5 ensemble
