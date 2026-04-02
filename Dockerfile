@@ -8,16 +8,22 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Copy dependency manifest first for layer caching.
-# uv sync --frozen uses the lockfile directly — no resolver run in CI/CD.
+# Copy dependency manifests first for layer caching
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Copy project source and data
+# Copy production source only (no data, no research, no weights)
 COPY rocket_classifier/ ./rocket_classifier/
-COPY data/ ./data/
+COPY download_weights.py ./
 
-# Install the project itself (now that source is available)
+# Install the project itself
 RUN uv sync --frozen --no-dev
+
+# Download model artifacts from GitHub Release at build time
+# weights/ is created by download_weights.py
+RUN uv run python download_weights.py
+
+# Pre-create runtime directories
+RUN mkdir -p cache outputs
 
 CMD ["uv", "run", "python", "-m", "rocket_classifier.main"]
