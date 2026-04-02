@@ -188,3 +188,30 @@ class TestRocketClassifierPredict:
     def test_production_biases_shape(self) -> None:
         assert PRODUCTION_BIASES.shape == (3,)
         assert PRODUCTION_BIASES[0] == pytest.approx(0.0)
+
+    def test_predict_with_proba_matches_predict_and_predict_proba(self) -> None:
+        """predict_with_proba must return the same results as calling predict and
+        predict_proba separately — one pass, same outputs."""
+        proba_fixed = np.array([[0.1, 0.7, 0.2], [0.6, 0.3, 0.1], [0.2, 0.2, 0.6]])
+        clf = _make_clf(proba_fixed)
+        X = np.zeros((3, N_FEATURES))
+        preds, proba = clf.predict_with_proba(X)
+        np.testing.assert_array_equal(preds, clf.predict(X))
+        np.testing.assert_array_almost_equal(proba, clf.predict_proba(X))
+
+    def test_predict_with_proba_shapes(self) -> None:
+        proba_fixed = np.array([[0.5, 0.3, 0.2]])
+        clf = _make_clf(proba_fixed)
+        X = np.zeros((1, N_FEATURES))
+        preds, proba = clf.predict_with_proba(X)
+        assert preds.shape == (1,)
+        assert proba.shape == (1, 3)
+
+    def test_predict_with_proba_bias_applied(self) -> None:
+        """Bias on class 2 must flip the prediction just as predict() does."""
+        proba_fixed = np.array([[0.6, 0.3, 0.1]])
+        biases = np.array([0.0, 0.0, 10.0])
+        clf = RocketClassifier(model=_StubModel(proba_fixed), medians=np.zeros(N_FEATURES), biases=biases)
+        X = np.zeros((1, N_FEATURES))
+        preds, _ = clf.predict_with_proba(X)
+        assert preds[0] == 2
