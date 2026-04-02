@@ -11,7 +11,8 @@ colab_brute_force_optimization.py:
 
   Stage 0: Data prep   — engineer salvo + rebel-group features from train.csv
   Stage 1: Feature sel — backward elimination on all 69 candidate features
-  Stage 2: Optuna      — 100-trial LightGBM search, per-fold threshold tuning,
+  Stage 2: Optuna      — 100-trial multi-algorithm search (LightGBM, XGBoost,
+                         CatBoost, TabMLP), per-fold threshold tuning,
                          MedianPruner, GroupKFold grouped by rebel_group_id
   Stage 3: Final model — OOB global threshold tuning, 100% retrain, artifacts
   Stage 4: Report      — side-by-side baseline vs enriched, per-fold breakdown,
@@ -51,15 +52,23 @@ Business assumptions leveraged (assignment)
 3c. Geographically concentrated -> rebel_group_id (pure-spatial DBSCAN)
 3d. Each group buys independently-> rebel_group_id is a class-label proxy
 
+Why each algorithm:
+  LightGBM  — best algorithm in previous experiments; fast GPU histogram building
+  XGBoost   — strong alternative; CUDA device; different regularisation inductive bias
+  CatBoost  — natively handles rebel_group_id as a true categorical (no hack needed)
+  TabMLP    — entity embedding for rebel_group_id + BatchNorm MLP; architecturally
+              correct NN for tabular + categorical data; tests whether H100 GPU
+              matrix ops beat GBT cache-miss patterns on this dataset size
+
 Setup (run in Colab first cell)
 -------------------------------
-    !pip install -q optuna lightgbm scikit-learn pandas numpy pyarrow
+    !pip install -q optuna lightgbm xgboost catboost scikit-learn pandas numpy pyarrow torch
 
 Files to upload to /content/:
     - train.csv
     - cache_train_features.parquet   (or .feather)
 
-Expected runtime on H100: ~60-90 min
+Expected runtime on H100: ~90-120 min
 """
 
 # %%
@@ -77,10 +86,15 @@ import joblib
 import numpy as np
 import optuna
 import pandas as pd
+import torch
+import torch.nn as nn
+import torch.utils.data as td
+from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
 from sklearn.cluster import DBSCAN
 from sklearn.model_selection import GroupKFold
 from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -126,11 +140,15 @@ GROUP_MIN_SAMP  = 3
 try:
     import subprocess as _sp
     _sp.run(["nvidia-smi"], check=True, capture_output=True)
-    DEVICE = "gpu"
+    DEVICE      = "gpu"     # LightGBM / CatBoost device string
+    XGB_DEVICE  = "cuda"    # XGBoost device string
+    TORCH_DEVICE= torch.device("cuda")
 except Exception:
-    DEVICE = "cpu"
+    DEVICE      = "cpu"
+    XGB_DEVICE  = "cpu"
+    TORCH_DEVICE= torch.device("cpu")
 N_JOBS = int(os.cpu_count() or 4)
-print(f"Device: {DEVICE}  |  CPU cores: {N_JOBS}")
+print(f"LightGBM/CatBoost: {DEVICE}  |  XGBoost: {XGB_DEVICE}  |  PyTorch: {TORCH_DEVICE}  |  CPU cores: {N_JOBS}")
 
 SELECTED_FEATURES: list[str] = [
     "n_points", "total_duration_s", "dt_std", "dt_max", "dt_median",
@@ -244,6 +262,179 @@ def make_lgbm(params: dict, cat_col_idx: int | None) -> LGBMClassifier:
         verbose=-1,
         categorical_feature=[cat_col_idx] if cat_col_idx is not None else "auto",
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# TabMLP: entity-embedding MLP for tabular + categorical data
+# ──────────────────────────────────────────────────────────────────────────────
+# Architecture (with rebel_group_id as the one categorical column):
+#
+#   rebel_group_id ──► Embedding(n_groups, embed_dim) ──► embed_vec
+#   continuous     ──► BatchNorm ──────────────────────► cont_vec
+#   [embed_vec || cont_vec] ──► MLP(hidden_dims, dropout) ──► logits(3)
+#
+# Why entity embeddings (not one-hot / integer):
+#   rebel_group_id is nominal: group 5 is not "greater than" group 3.
+#   An embedding lets the model learn a dense similarity space over groups,
+#   so it can generalise "groups with similar launch patterns have similar
+#   classes" — which is exactly what assumption 3d implies.
+#
+# If rebel_group_id was dropped by feature selection (cat_col is None),
+# the model falls back to a pure continuous MLP (no embedding).
+
+class TabMLP(nn.Module):
+    """Entity-embedding MLP for one categorical + N continuous features."""
+
+    def __init__(
+        self,
+        n_continuous: int,
+        n_categories: int,     # number of unique rebel_group_id values + 1
+        embed_dim: int,
+        hidden_dims: list[int],
+        dropout: float,
+        cat_col: int | None,   # column index of rebel_group_id in X
+    ) -> None:
+        super().__init__()
+        self.cat_col = cat_col
+        if cat_col is not None:
+            self.embed = nn.Embedding(n_categories, embed_dim, padding_idx=0)
+            in_dim = (n_continuous - 1) + embed_dim
+        else:
+            self.embed = None
+            in_dim = n_continuous
+
+        layers: list[nn.Module] = [nn.BatchNorm1d(in_dim)]
+        for h in hidden_dims:
+            layers += [nn.Linear(in_dim, h), nn.BatchNorm1d(h), nn.ReLU(), nn.Dropout(dropout)]
+            in_dim = h
+        layers.append(nn.Linear(in_dim, N_CLASSES))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.cat_col is not None and self.embed is not None:
+            cat = x[:, self.cat_col].long().clamp(0)  # safe cast to index
+            cont_cols = [i for i in range(x.shape[1]) if i != self.cat_col]
+            cont = x[:, cont_cols]
+            emb = self.embed(cat)
+            x = torch.cat([cont, emb], dim=1)
+        return self.net(x)
+
+
+def _tabmlp_proba(model: TabMLP, X: np.ndarray) -> np.ndarray:
+    """Run forward pass, return softmax probabilities."""
+    model.eval()
+    with torch.no_grad():
+        logits = model(torch.tensor(X, dtype=torch.float32).to(TORCH_DEVICE))
+    return torch.softmax(logits, dim=1).cpu().numpy()
+
+
+def _fit_tabmlp(
+    Xtr: np.ndarray,
+    ytr: np.ndarray,
+    sw: np.ndarray,
+    cat_col: int | None,
+    params: dict,
+    n_categories: int,
+) -> TabMLP:
+    """Train a TabMLP for a fixed number of epochs (no early stopping).
+
+    No early stopping: using the validation fold for stopping would leak
+    label information. Optuna instead tunes `epochs` directly.
+    """
+    device = TORCH_DEVICE
+    model = TabMLP(
+        n_continuous=Xtr.shape[1],
+        n_categories=n_categories,
+        embed_dim=params["embed_dim"],
+        hidden_dims=[params["hidden_dim"]] * params["n_layers"],
+        dropout=params["dropout"],
+        cat_col=cat_col,
+    ).to(device)
+
+    class_w = torch.tensor(
+        [1.0 / max((ytr == c).sum(), 1) for c in range(N_CLASSES)],
+        dtype=torch.float32, device=device,
+    )
+    class_w = class_w / class_w.sum() * N_CLASSES
+    criterion = nn.CrossEntropyLoss(weight=class_w, reduction="none")
+    optimizer = torch.optim.Adam(model.parameters(), lr=params["lr"], weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params["epochs"])
+
+    dataset = td.TensorDataset(
+        torch.tensor(Xtr, dtype=torch.float32),
+        torch.tensor(ytr, dtype=torch.long),
+        torch.tensor(sw, dtype=torch.float32),
+    )
+    loader = td.DataLoader(dataset, batch_size=params["batch_size"], shuffle=True, drop_last=False)
+
+    model.train()
+    for _ in range(params["epochs"]):
+        for xb, yb, wb in loader:
+            xb, yb, wb = xb.to(device), yb.to(device), wb.to(device)
+            loss = (criterion(model(xb), yb) * wb).sum() / wb.sum()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        scheduler.step()
+    return model
+
+
+def run_fold(
+    algo: str,
+    params: dict,
+    Xtr: np.ndarray,
+    ytr: np.ndarray,
+    sw: np.ndarray,
+    Xv: np.ndarray,
+    cat_col: int | None,
+    n_cat: int = 1,
+) -> tuple[object, np.ndarray]:
+    """Fit one fold and return (fitted_model, proba_on_Xv).
+
+    Unified interface for all algorithms — Optuna objective calls this.
+    For TabMLP, n_cat = number of unique rebel_group_id values + 2 (padding).
+    """
+    if algo == "lightgbm":
+        m = make_lgbm(params, cat_col)
+        m.fit(Xtr, ytr, sample_weight=sw)
+        return m, m.predict_proba(Xv)
+
+    if algo == "xgboost":
+        m = XGBClassifier(
+            **params,
+            objective="multi:softprob",
+            num_class=N_CLASSES,
+            eval_metric="mlogloss",
+            tree_method="hist",
+            device=XGB_DEVICE,
+            random_state=RANDOM_SEED,
+            verbosity=0,
+        )
+        m.fit(Xtr, ytr, sample_weight=sw)
+        return m, m.predict_proba(Xv)
+
+    if algo == "catboost":
+        p = dict(params)
+        m = CatBoostClassifier(
+            iterations=p.pop("n_estimators", 600),
+            depth=min(p.pop("max_depth", 6), 10),
+            learning_rate=p.pop("learning_rate", 0.05),
+            subsample=p.pop("subsample", 0.8),
+            l2_leaf_reg=p.pop("reg_lambda", 1.0),
+            bootstrap_type="Bernoulli",
+            loss_function="MultiClass",
+            classes_count=N_CLASSES,
+            cat_features=[cat_col] if cat_col is not None else [],
+            task_type="GPU" if DEVICE == "gpu" else "CPU",
+            random_seed=RANDOM_SEED,
+            verbose=0,
+        )
+        m.fit(Xtr, ytr, sample_weight=sw)
+        return m, m.predict_proba(Xv)
+
+    # tabmlp
+    m = _fit_tabmlp(Xtr, ytr, sw, cat_col, params, n_cat)
+    return m, _tabmlp_proba(m, Xv)
 
 
 # %%
@@ -525,19 +716,54 @@ def create_objective(
     groups: np.ndarray,
     n_splits: int,
     cat_col: int | None,
+    n_cat: int,
 ) -> callable:
     def objective(trial: optuna.Trial) -> float:
-        params = dict(
-            n_estimators      = trial.suggest_int("n_estimators", 300, 3000),
-            learning_rate     = trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            max_depth         = trial.suggest_int("max_depth", 4, 15),
-            num_leaves        = trial.suggest_int("num_leaves", 31, 300),
-            min_child_samples = trial.suggest_int("min_child_samples", 5, 100),
-            subsample         = trial.suggest_float("subsample", 0.5, 1.0),
-            colsample_bytree  = trial.suggest_float("colsample_bytree", 0.4, 1.0),
-            reg_alpha         = trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
-            reg_lambda        = trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+        algo = trial.suggest_categorical(
+            "algorithm", ["lightgbm", "xgboost", "catboost", "tabmlp"]
         )
+
+        if algo == "lightgbm":
+            hp = dict(
+                n_estimators      = trial.suggest_int("n_estimators", 300, 3000),
+                learning_rate     = trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+                max_depth         = trial.suggest_int("max_depth", 4, 15),
+                num_leaves        = trial.suggest_int("num_leaves", 31, 300),
+                min_child_samples = trial.suggest_int("min_child_samples", 5, 100),
+                subsample         = trial.suggest_float("subsample", 0.5, 1.0),
+                colsample_bytree  = trial.suggest_float("colsample_bytree", 0.4, 1.0),
+                reg_alpha         = trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+                reg_lambda        = trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+            )
+        elif algo == "xgboost":
+            hp = dict(
+                n_estimators      = trial.suggest_int("n_estimators", 300, 3000),
+                learning_rate     = trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+                max_depth         = trial.suggest_int("max_depth", 3, 12),
+                subsample         = trial.suggest_float("subsample", 0.5, 1.0),
+                colsample_bytree  = trial.suggest_float("colsample_bytree", 0.4, 1.0),
+                min_child_weight  = trial.suggest_float("min_child_weight", 1.0, 20.0, log=True),
+                reg_alpha         = trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+                reg_lambda        = trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+            )
+        elif algo == "catboost":
+            hp = dict(
+                n_estimators      = trial.suggest_int("n_estimators", 300, 2500),
+                learning_rate     = trial.suggest_float("learning_rate", 0.01, 0.15, log=True),
+                max_depth         = trial.suggest_int("max_depth", 4, 10),
+                subsample         = trial.suggest_float("subsample", 0.6, 1.0),
+                reg_lambda        = trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
+            )
+        else:  # tabmlp
+            hp = dict(
+                n_layers   = trial.suggest_int("n_layers", 2, 5),
+                hidden_dim = trial.suggest_int("hidden_dim", 64, 512),
+                embed_dim  = trial.suggest_int("embed_dim", 4, 32),
+                dropout    = trial.suggest_float("dropout", 0.0, 0.5),
+                lr         = trial.suggest_float("lr", 1e-4, 1e-2, log=True),
+                batch_size = trial.suggest_categorical("batch_size", [128, 256, 512]),
+                epochs     = trial.suggest_int("epochs", 20, 100),
+            )
 
         gkf = GroupKFold(n_splits=n_splits)
         fold_raw, fold_tuned = [], []
@@ -550,34 +776,30 @@ def create_objective(
             impute_nan(Xv, med)
             sw = compute_sample_weights(ytr)
 
-            clf = make_lgbm(params, cat_col)
-            clf.fit(Xtr, ytr, sample_weight=sw)
-            proba = clf.predict_proba(Xv)
+            _, proba = run_fold(algo, hp, Xtr, ytr, sw, Xv, cat_col, n_cat)
 
             fold_raw.append(min_class_recall(yv, np.argmax(proba, axis=1)))
             _, ts = optimize_thresholds(yv, proba)
             fold_tuned.append(ts)
 
-            # Prune bad trials early (after fold 2)
             if fold_idx >= 2:
                 trial.report(float(np.mean(fold_tuned)), fold_idx)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
-        mean_raw    = float(np.mean(fold_raw))
-        mean_tuned  = float(np.mean(fold_tuned))
-        min_tuned   = float(np.min(fold_tuned))
+        mean_raw   = float(np.mean(fold_raw))
+        mean_tuned = float(np.mean(fold_tuned))
+        min_tuned  = float(np.min(fold_tuned))
 
+        trial.set_user_attr("algorithm", algo)
         trial.set_user_attr("mean_raw", mean_raw)
         trial.set_user_attr("mean_tuned", mean_tuned)
         trial.set_user_attr("min_fold_tuned", min_tuned)
         trial.set_user_attr("fold_scores_tuned", fold_tuned)
 
         log.info(
-            "Trial %3d | raw=%.4f | tuned=%.4f | min_fold=%.4f | "
-            "n=%d d=%d lr=%.4f",
-            trial.number, mean_raw, mean_tuned, min_tuned,
-            params["n_estimators"], params["max_depth"], params["learning_rate"],
+            "Trial %3d | %-9s | raw=%.4f | tuned=%.4f | min_fold=%.4f",
+            trial.number, algo, mean_raw, mean_tuned, min_tuned,
         )
         return mean_tuned
 
@@ -590,8 +812,11 @@ study = optuna.create_study(
     sampler=optuna.samplers.TPESampler(seed=RANDOM_SEED),
     pruner=optuna.pruners.MedianPruner(n_warmup_steps=3),
 )
+# n_cat: how many unique rebel_group_id values + 2 (padding for unseen groups)
+n_cat_global = int(feats["rebel_group_id"].max()) + 2
+
 study.optimize(
-    create_objective(X_sel, y, cv_groups, effective_splits_optuna, rebel_group_col_sel),
+    create_objective(X_sel, y, cv_groups, effective_splits_optuna, rebel_group_col_sel, n_cat_global),
     n_trials=N_TRIALS,
     show_progress_bar=True,
 )
@@ -607,8 +832,8 @@ log.info("Optuna complete. Best trial #%d: tuned=%.4f  raw=%.4f  min_fold=%.4f",
 log.info("Top 5 trials:")
 for t in sorted(study.trials, key=lambda t: t.value or -1, reverse=True)[:5]:
     if t.value is not None:
-        log.info("  #%3d tuned=%.4f  raw=%.4f  min_fold=%.4f",
-                 t.number, t.value,
+        log.info("  #%3d %-9s tuned=%.4f  raw=%.4f  min_fold=%.4f",
+                 t.number, t.user_attrs.get("algorithm", "?"), t.value,
                  t.user_attrs.get("mean_raw", -1),
                  t.user_attrs.get("min_fold_tuned", -1))
 
@@ -620,9 +845,12 @@ log.info("=" * 70)
 log.info("STAGE 3: FINAL MODEL — OOB THRESHOLD TUNING + 100%% RETRAIN")
 log.info("=" * 70)
 
+best_algo   = best.user_attrs.get("algorithm", best.params.get("algorithm", "lightgbm"))
+best_params = {k: v for k, v in best.params.items() if k != "algorithm"}
+log.info("Best algorithm: %s", best_algo)
+
 gkf_final = GroupKFold(n_splits=effective_splits_optuna)
 oob_proba = np.zeros((len(y), N_CLASSES))
-best_params = dict(best.params)
 
 for tr_idx, val_idx in gkf_final.split(X_sel, y, cv_groups):
     Xtr, Xv = X_sel[tr_idx].copy(), X_sel[val_idx].copy()
@@ -631,9 +859,8 @@ for tr_idx, val_idx in gkf_final.split(X_sel, y, cv_groups):
     impute_nan(Xtr, med)
     impute_nan(Xv, med)
     sw = compute_sample_weights(ytr)
-    clf = make_lgbm(best_params, rebel_group_col_sel)
-    clf.fit(Xtr, ytr, sample_weight=sw)
-    oob_proba[val_idx] = clf.predict_proba(Xv)
+    _, proba = run_fold(best_algo, dict(best_params), Xtr, ytr, sw, Xv, rebel_group_col_sel, n_cat_global)
+    oob_proba[val_idx] = proba
 
 biases, oob_global_score = optimize_thresholds(y, oob_proba)
 log.info("OOB global threshold-tuned score: %.6f", oob_global_score)
@@ -649,19 +876,34 @@ X_full = X_sel.copy()
 med_full = np.nanmedian(X_full, axis=0)
 impute_nan(X_full, med_full)
 sw_full = compute_sample_weights(y)
-final_clf = make_lgbm(best_params, rebel_group_col_sel)
-final_clf.fit(X_full, y, sample_weight=sw_full)
+final_model, _ = run_fold(
+    best_algo, dict(best_params), X_full, y, sw_full,
+    X_full[:1], rebel_group_col_sel, n_cat_global,  # Xv dummy — not used
+)
 
 # Train recall sanity check
-train_proba = final_clf.predict_proba(X_full)
-train_raw = min_class_recall(y, np.argmax(train_proba, axis=1))
+if best_algo == "tabmlp":
+    train_proba = _tabmlp_proba(final_model, X_full)
+else:
+    train_proba = final_model.predict_proba(X_full)
+train_raw   = min_class_recall(y, np.argmax(train_proba, axis=1))
 train_tuned = min_class_recall(y, np.argmax(np.log(train_proba + 1e-12) + biases, axis=1))
 
 # Save artifacts
 ARTIFACTS_DIR.mkdir(exist_ok=True)
-joblib.dump(final_clf, str(ARTIFACTS_DIR / "model_salvo.pkl"))
+if best_algo == "lightgbm":
+    joblib.dump(final_model, str(ARTIFACTS_DIR / "model_salvo.pkl"))
+    final_model.booster_.save_model(str(ARTIFACTS_DIR / "model_salvo.lgb"))
+elif best_algo == "xgboost":
+    final_model.save_model(str(ARTIFACTS_DIR / "model_salvo.json"))
+elif best_algo == "catboost":
+    final_model.save_model(str(ARTIFACTS_DIR / "model_salvo.cbm"))
+else:  # tabmlp
+    torch.save(final_model.state_dict(), str(ARTIFACTS_DIR / "model_salvo_tabmlp.pt"))
 np.save(str(ARTIFACTS_DIR / "train_medians_salvo.npy"), med_full)
 np.save(str(ARTIFACTS_DIR / "threshold_biases_salvo.npy"), biases)
+with open(str(ARTIFACTS_DIR / "selected_features_salvo.json"), "w") as f:
+    json.dump({"algorithm": best_algo, "features": selected_features}, f, indent=2)
 log.info("Artifacts saved to %s", ARTIFACTS_DIR)
 
 # %%
@@ -696,10 +938,13 @@ for _, val_idx in GroupKFold(n_splits=effective_splits_optuna).split(X_baseline,
     preds = np.argmax(np.log(oob_proba_base[val_idx] + 1e-12) + base_biases, axis=1)
     base_fold_scores.append(min_class_recall(y[val_idx], preds))
 
-# Feature importances for enriched model
-importances_final = pd.Series(
-    final_clf.feature_importances_, index=selected_features,
-).sort_values(ascending=False)
+# Feature importances (tree models only — TabMLP uses attention weights not available here)
+if best_algo != "tabmlp" and hasattr(final_model, "feature_importances_"):
+    importances_final = pd.Series(
+        final_model.feature_importances_, index=selected_features,
+    ).sort_values(ascending=False)
+else:
+    importances_final = pd.Series(dtype=float)  # empty for TabMLP
 
 # ── Print full report ──────────────────────────────────────────────────────────
 
