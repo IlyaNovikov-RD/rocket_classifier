@@ -1,16 +1,20 @@
 """Inference-only rocket trajectory classifier.
 
-Loads a pre-trained LightGBM model (trained via GPU-accelerated Optuna
-search in ``research/colab_brute_force_optimization.py``) and applies
-threshold-tuned predictions optimised for the min-recall metric.
+Loads a pre-trained LightGBM model and applies threshold-tuned predictions
+optimised for the min-recall metric.
 
 No training logic lives here — all training was performed in Colab on
 H100 GPU. This module is the production inference entrypoint.
 
 Production artifacts (served from the latest GitHub Release — run ``make download-weights``):
-    - model.pkl           — LightGBM Booster (61 features, 2011 trees, depth 12)
+    - model.onnx          — ONNX format (fastest inference, preferred)
+    - model.lgb           — native LightGBM text format (fast load, fallback)
+    - model.pkl           — joblib-pickled LGBMClassifier (legacy fallback)
     - train_medians.npy   — per-feature NaN imputation medians (61 values)
     - threshold_biases.npy — per-class log-probability biases [0, 1.063, 2.177]
+
+Backend selection order (automatic, first available wins):
+    model.onnx  →  model.lgb  →  model.pkl
 """
 
 from __future__ import annotations
@@ -49,6 +53,39 @@ SELECTED_FEATURES: list[str] = [
 PRODUCTION_BIASES: np.ndarray = np.array([0.000000, 1.063291, 2.177215])
 
 
+# ---------------------------------------------------------------------------
+# Backend wrappers — unified predict_proba interface
+# ---------------------------------------------------------------------------
+
+
+class _ONNXBackend:
+    """ONNX Runtime inference backend (fastest — 2.6x over sklearn wrapper)."""
+
+    def __init__(self, session: object) -> None:
+        self._session = session
+        self._input_name: str = session.get_inputs()[0].name  # type: ignore[union-attr]
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        return self._session.run(  # type: ignore[union-attr]
+            ["probabilities"], {self._input_name: X.astype(np.float32)}
+        )[0]
+
+
+class _NativeLGBMBackend:
+    """Native LightGBM Booster backend (1.6x over sklearn wrapper, no sklearn overhead)."""
+
+    def __init__(self, booster: object) -> None:
+        self._booster = booster
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        return self._booster.predict(X)  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
+# RocketClassifier
+# ---------------------------------------------------------------------------
+
+
 class RocketClassifier:
     """Inference wrapper for the pre-trained LightGBM rocket classifier.
 
@@ -57,11 +94,14 @@ class RocketClassifier:
     from the 76 engineered by ``build_features`` via ``SELECTED_FEATURES``)
     and returns threshold-tuned class predictions.
 
+    Backend is selected automatically based on which artifact files exist:
+    ``model.onnx`` (fastest) → ``model.lgb`` → ``model.pkl`` (legacy).
+
     Usage::
 
         clf = RocketClassifier.from_artifacts(
-            model_path="model.pkl",
-            medians_path="train_medians.npy",
+            model_path="weights/model.pkl",
+            medians_path="weights/train_medians.npy",
         )
         preds = clf.predict(feature_df)
     """
@@ -86,21 +126,63 @@ class RocketClassifier:
     ) -> RocketClassifier:
         """Load a classifier from disk artifacts.
 
+        Tries backends in order of performance: ONNX → native LightGBM → pkl.
+
         Args:
-            model_path:  Path to the LightGBM model file (joblib .pkl).
+            model_path:   Path to the base model file (any of .onnx/.lgb/.pkl).
+                          Sibling files with the other extensions are tried automatically.
             medians_path: Path to the 61-value NaN imputation medians (.npy).
-            biases_path: Optional path to threshold biases (.npy). If not
-                provided, uses the hardcoded production biases.
+            biases_path:  Optional path to threshold biases (.npy). If not
+                          provided, uses the hardcoded production biases.
 
         Returns:
             A ready-to-use ``RocketClassifier`` instance.
         """
-        model = joblib.load(str(model_path))
+        base = Path(model_path).with_suffix("")
+        onnx_path = base.with_suffix(".onnx")
+        lgb_path = base.with_suffix(".lgb")
+        pkl_path = base.with_suffix(".pkl")
+
+        model: object
+        backend_name: str
+
+        if onnx_path.exists():
+            try:
+                import onnxruntime as ort
+                so = ort.SessionOptions()
+                so.log_severity_level = 3  # suppress shape mismatch warnings
+                session = ort.InferenceSession(
+                    str(onnx_path),
+                    sess_options=so,
+                    providers=["CPUExecutionProvider"],
+                )
+                model = _ONNXBackend(session)
+                backend_name = f"ONNX ({onnx_path.name})"
+            except Exception as exc:
+                logger.warning("ONNX backend unavailable (%s), trying lgb/pkl", exc)
+                model = None  # type: ignore[assignment]
+                backend_name = ""
+            else:
+                pass  # model set above
+        else:
+            model = None  # type: ignore[assignment]
+            backend_name = ""
+
+        if model is None and lgb_path.exists():
+            import lightgbm as lgb
+            booster = lgb.Booster(model_file=str(lgb_path))
+            model = _NativeLGBMBackend(booster)
+            backend_name = f"native LightGBM ({lgb_path.name})"
+
+        if model is None:
+            model = joblib.load(str(pkl_path))
+            backend_name = f"joblib ({pkl_path.name})"
+
         medians = np.load(str(medians_path))
         biases = np.load(str(biases_path)) if biases_path else PRODUCTION_BIASES
         logger.info(
-            "Loaded RocketClassifier: %d features, biases=[%.3f, %.3f, %.3f]",
-            len(SELECTED_FEATURES), *biases,
+            "Loaded RocketClassifier [%s]: %d features, biases=[%.3f, %.3f, %.3f]",
+            backend_name, len(SELECTED_FEATURES), *biases,
         )
         return cls(model=model, medians=medians, biases=biases)
 
@@ -124,7 +206,7 @@ class RocketClassifier:
             Probability array of shape (N, 3).
         """
         X = self._select_and_impute(feature_df)
-        return self.model.predict_proba(X)
+        return self.model.predict_proba(X)  # type: ignore[union-attr]
 
     def predict(self, feature_df: np.ndarray) -> np.ndarray:
         """Return threshold-tuned class predictions.
