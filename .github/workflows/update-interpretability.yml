@@ -58,6 +58,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.event.release.tag_name }}"
+          # Fall back to the latest release tag when triggered via workflow_dispatch
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          fi
           # Remove old submission.csv from release if it exists, then re-upload
           gh release delete-asset "$TAG" submission.csv --yes 2>/dev/null || true
           gh release upload "$TAG" outputs/submission.csv
