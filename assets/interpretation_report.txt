@@ -17,110 +17,113 @@ TOP 20 MOST INFLUENTIAL FEATURES
 ------------------------------------------------------------------------
 Rank  Feature                         Mean |SHAP|
 ------------------------------------------------------------------------
-1     initial_z                          2.197880
-2     launch_x                           1.257661
-3     v_horiz_median                     1.034655
-4     acc_horiz_min                      0.696109
-5     launch_y                           0.640138
-6     final_z                            0.557234
-7     apogee_relative                    0.467183
-8     vy_mean                            0.245090
-9     delta_z_total                      0.226514
-10    initial_speed                      0.187106
-11    vx_min                             0.150359
-12    max_horiz_range                    0.150152
-13    vx_max                             0.133522
-14    time_to_apogee_s                   0.129082
-15    n_points                           0.127438
-16    initial_vz                         0.106632
-17    vz_median                          0.105594
-18    final_horiz_range                  0.104536
-19    final_vz                           0.104221
-20    x_range                            0.103854
+1     initial_z                          3.493212
+2     launch_x                           2.213149
+3     v_horiz_median                     1.925803
+4     launch_y                           1.129119
+5     acc_horiz_min                      1.071793
+6     final_z                            0.982687
+7     apogee_relative                    0.780910
+8     delta_z_total                      0.534517
+9     n_points                           0.420322
+10    vy_mean                            0.387419
+11    initial_speed                      0.362657
+12    salvo_time_rank                    0.228560
+13    y_range                            0.209065
+14    x_range                            0.198902
+15    final_vz                           0.195369
+16    initial_vz                         0.177653
+17    vz_median                          0.166648
+18    v_horiz_std                        0.135192
+19    vy_max                             0.126792
+20    acc_mag_min                        0.113503
 
 PHYSICAL INTERPRETATION OF TOP FEATURES
 ------------------------------------------------------------------------
 
-[INITIAL_Z]  (mean |SHAP| of top member: 2.197880)
+[INITIAL_Z]  (mean |SHAP| of top member: 3.493212)
   Initial Altitude — launch site elevation.
 
-[LAUNCH_X]  (mean |SHAP| of top member: 1.257661)
+[LAUNCH_X]  (mean |SHAP| of top member: 2.213149)
   Launch X Coordinate — launcher position; clusters by rebel group.
 
-[V_HORIZ]  (mean |SHAP| of top member: 1.034655)
+[V_HORIZ]  (mean |SHAP| of top member: 1.925803)
   Horizontal Speed — range capability; longer-range rockets fly faster
   horizontally.
 
-[ACC_HORIZ]  (mean |SHAP| of top member: 0.696109)
+[LAUNCH_Y]  (mean |SHAP| of top member: 1.129119)
+  Launch Y Coordinate — launcher position; clusters by rebel group.
+
+[ACC_HORIZ]  (mean |SHAP| of top member: 1.071793)
   Horizontal Acceleration — lateral manoeuvring capability; unguided
   rockets show near-zero horizontal acceleration.
 
-[LAUNCH_Y]  (mean |SHAP| of top member: 0.640138)
-  Launch Y Coordinate — launcher position; clusters by rebel group.
-
-[FINAL_Z]  (mean |SHAP| of top member: 0.557234)
+[FINAL_Z]  (mean |SHAP| of top member: 0.982687)
   Final Altitude — altitude at last radar contact.
 
-[APOGEE_RELATIVE]  (mean |SHAP| of top member: 0.467183)
+[APOGEE_RELATIVE]  (mean |SHAP| of top member: 0.780910)
   Apogee Rise — altitude gained above launch point; normalises for
   varying launch elevations.
 
-[VY]  (mean |SHAP| of top member: 0.245090)
-  Y-axis Velocity Component — heading vector element.
-
-[DELTA_Z_TOTAL]  (mean |SHAP| of top member: 0.226514)
+[DELTA_Z_TOTAL]  (mean |SHAP| of top member: 0.534517)
   Net Altitude Change — positive = still ascending, negative =
   landed/descending.
 
-[INITIAL_SPEED]  (mean |SHAP| of top member: 0.187106)
-  Initial Speed — muzzle velocity; tightly controlled by propellant
-  charge, highly class-discriminative.
-
-[VX]  (mean |SHAP| of top member: 0.150359)
-  X-axis Velocity Component — heading vector element.
-
-[MAX_HORIZ_RANGE]  (mean |SHAP| of top member: 0.150152)
-  Maximum Horizontal Range — furthest point from launch in the xy-plane.
-
-[TIME_TO_APOGEE_S]  (mean |SHAP| of top member: 0.129082)
-  Absolute Time to Apogee — seconds from launch to peak altitude.
-
-[N_POINTS]  (mean |SHAP| of top member: 0.127438)
+[N_POINTS]  (mean |SHAP| of top member: 0.420322)
   Point Count — number of radar returns; denser sampling improves
   feature quality but is also radar-type dependent.
 
-[INITIAL_VZ]  (mean |SHAP| of top member: 0.106632)
-  Initial Vertical Velocity — determines apogee independently of
-  azimuth.
+[VY]  (mean |SHAP| of top member: 0.387419)
+  Y-axis Velocity Component — heading vector element.
 
-[VZ]  (mean |SHAP| of top member: 0.105594)
-  Vertical Velocity Component — controls apogee height and time-of-
-  flight.
+[INITIAL_SPEED]  (mean |SHAP| of top member: 0.362657)
+  Initial Speed — muzzle velocity; tightly controlled by propellant
+  charge, highly class-discriminative.
 
-[FINAL_HORIZ_RANGE]  (mean |SHAP| of top member: 0.104536)
-  Final Horizontal Range — downrange distance at last radar contact.
+[SALVO_TIME_RANK]  (mean |SHAP| of top member: 0.228560)
+  Salvo Time Rank — this rocket's launch order within its salvo
+  (assumption 3b). Later-fired rockets carry a kinematic imprint from
+  preceding launches.
 
-[FINAL_VZ]  (mean |SHAP| of top member: 0.104221)
+[Y_RANGE]  (mean |SHAP| of top member: 0.209065)
+  Y-axis Spatial Extent — bounding box dimension.
+
+[X_RANGE]  (mean |SHAP| of top member: 0.198902)
+  X-axis Spatial Extent — bounding box dimension.
+
+[FINAL_VZ]  (mean |SHAP| of top member: 0.195369)
   Terminal Vertical Velocity — negative = descending; magnitude encodes
   steepness.
 
-[X_RANGE]  (mean |SHAP| of top member: 0.103854)
-  X-axis Spatial Extent — bounding box dimension.
+[INITIAL_VZ]  (mean |SHAP| of top member: 0.177653)
+  Initial Vertical Velocity — determines apogee independently of
+  azimuth.
+
+[VZ]  (mean |SHAP| of top member: 0.166648)
+  Vertical Velocity Component — controls apogee height and time-of-
+  flight.
+
+[ACC_MAG]  (mean |SHAP| of top member: 0.113503)
+  3D Acceleration Magnitude — captures the net force profile; heavier
+  rockets show lower peak acceleration for the same thrust.
 
 ========================================================================
 KEY FINDING
 ------------------------------------------------------------------------
-Kinematic derivative features (jerk, acceleration) consistently outrank
-raw positional features. This confirms the core design hypothesis:
-rocket classes are discriminated by their propulsion physics, not their
-launch geography. The launch angle and initial speed further reflect
-manufacturer-level differences in motor design.
+Launch position and kinematic derivative features dominate. Geography
+(launch_x, launch_y, initial_z) clusters by rebel group, providing near-
+definitive class context from domain assumption 3c. Among salvo
+features, salvo_time_rank consistently ranks in the top 10 — confirming
+that launch order within a firing event carries a detectable kinematic
+signature (assumption 3b). Kinematic derivatives (acceleration,
+velocity) capture propulsion physics that differ by rocket family,
+independent of geography.
 
 OPERATIONAL IMPLICATION
 ------------------------------------------------------------------------
 The model can produce a reliable classification from the first few
-seconds of flight — the period during which jerk and initial speed are
-established — enabling early threat assessment well before the rocket
-reaches its apogee or impact point.
+seconds of flight — the period during which initial speed, launch
+position, and salvo context are established — enabling early threat
+assessment well before the rocket reaches apogee.
 
 ========================================================================

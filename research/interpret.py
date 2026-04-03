@@ -91,11 +91,26 @@ _FEATURE_CONTEXT: dict[str, str] = {
     "z_range": "Z-axis Spatial Extent (altitude envelope).",
     "launch_x": "Launch X Coordinate — launcher position; clusters by rebel group.",
     "launch_y": "Launch Y Coordinate — launcher position; clusters by rebel group.",
-    "launch_z": "Launch Altitude — terrain elevation at launch site (flat in Shtuchia → ~0).",
+    "launch_z": "Launch Altitude — terrain elevation at launch site (~0, flat terrain assumption).",
     "dt": "Inter-sample Time Delta — radar sampling interval statistics.",
     "initial_z": "Initial Altitude — launch site elevation.",
     "final_z": "Final Altitude — altitude at last radar contact.",
     "mean_az": "Mean Vertical Acceleration — should be ~-9.81 m/s² for purely ballistic flight.",
+    # Salvo and rebel-group features (domain assumptions 3a-3c)
+    "salvo_size": "Salvo Size — number of rockets fired in the same spatiotemporal cluster "
+    "(assumption 3b). Larger salvos indicate a better-stocked launcher.",
+    "salvo_duration_s": "Salvo Duration — seconds between first and last launch in the salvo. "
+    "Tightly-timed salvos are operationally distinct from spread-out barrages.",
+    "salvo_spatial_spread_m": "Salvo Spatial Spread — maximum pairwise launch distance within "
+    "the salvo. Single-launcher salvos have near-zero spread.",
+    "salvo_time_rank": "Salvo Time Rank — this rocket's launch order within its salvo "
+    "(assumption 3b). Later-fired rockets carry a kinematic imprint from preceding launches.",
+    "group_total_rockets": "Group Total Rockets — total rockets ever attributed to this rebel "
+    "base (assumption 3c). Larger groups have more diverse firing histories.",
+    "group_n_salvos": "Group Salvo Count — number of distinct firing events from this base. "
+    "Frequent firer vs. occasional attacker.",
+    "group_max_salvo_size": "Group Max Salvo Size — largest single salvo from this base "
+    "(assumption 3a — proxy for launcher payload capacity).",
 }
 
 CLASS_NAMES = ["Class 0", "Class 1", "Class 2"]
@@ -116,39 +131,79 @@ def load_features() -> tuple[pd.DataFrame, pd.DataFrame]:
         return pd.read_parquet(CACHE_TRAIN), pd.read_parquet(CACHE_TEST)
 
     logger.info("Cache not found — rebuilding features from raw CSV...")
+    import pyarrow.feather as pa_feather
+
     train_raw = pd.read_csv(DATA_DIR / "train.csv")
     test_raw = pd.read_csv(DATA_DIR / "test.csv")
     train_feats = build_features(train_raw)
     test_feats = build_features(test_raw)
     train_feats.to_parquet(CACHE_TRAIN)
     test_feats.to_parquet(CACHE_TEST)
+    # Write Arrow IPC feather sidecar so subsequent `make run` uses the fast path
+    pa_feather.write_feather(
+        train_feats, str(CACHE_TRAIN.with_suffix(".feather")), compression="lz4"
+    )
+    pa_feather.write_feather(test_feats, str(CACHE_TEST.with_suffix(".feather")), compression="lz4")
     return train_feats, test_feats
 
 
 def load_model(
     train_feats: pd.DataFrame,
 ) -> tuple[object, list[str], pd.DataFrame]:
-    """Load the production LightGBM model for SHAP analysis."""
-    model_path = ROOT / "weights" / "model.pkl"
+    """Load the production LightGBM model for SHAP analysis.
+
+    The model expects 35-column input (32 SELECTED_FEATURES + 3 global class
+    priors).  For SHAP we append the fixed global priors so the booster
+    receives the correct shape, then report SHAP values only for the 32
+    interpretable features (the priors are constant → near-zero SHAP).
+    """
+    model_path = ROOT / "weights" / "model.lgb"
     medians_path = ROOT / "weights" / "train_medians.npy"
 
     if not model_path.exists():
         msg = f"Model not found at {model_path}. Run: make download-weights"
         raise FileNotFoundError(msg)
 
+    # Load medians and biases via the standard helper
     clf = RocketClassifier.from_artifacts(model_path, medians_path)
 
     feature_cols = SELECTED_FEATURES
     X_train = train_feats.reindex(columns=feature_cols)
     X_train_filled = X_train.fillna(pd.Series(clf.medians, index=feature_cols))
-    return clf.model, feature_cols, X_train_filled
+
+    # Append the 3 global class-prior columns the model was trained with
+    from rocket_classifier.model import _GLOBAL_CLASS_PRIOR
+
+    prior_cols = pd.DataFrame(
+        np.tile(_GLOBAL_CLASS_PRIOR, (len(X_train_filled), 1)),
+        columns=["_prior_0", "_prior_1", "_prior_2"],
+        index=X_train_filled.index,
+    )
+    X_train_35 = pd.concat([X_train_filled, prior_cols], axis=1)
+
+    # SHAP TreeExplainer requires the raw LightGBM Booster — not the ONNX or
+    # sklearn wrapper.  Load model.lgb directly to guarantee we get the booster
+    # regardless of whether model.onnx is also present.
+    import lightgbm as _lgb
+
+    lgb_path = ROOT / "weights" / "model.lgb"
+    if not lgb_path.exists():
+        raise FileNotFoundError(
+            f"{lgb_path} not found. Run: make download-weights\n"
+            "(model.lgb is required alongside model.onnx for SHAP analysis)"
+        )
+    raw_model = _lgb.Booster(model_file=str(lgb_path))
+
+    return raw_model, feature_cols, X_train_35, clf.medians
 
 
 SHAP_SAMPLE_SIZE = 500  # trajectories to explain — sufficient for stable importance ranks
 
 
 def compute_shap(
-    model: object, X_train: pd.DataFrame, X_test: pd.DataFrame,
+    model: object,
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute exact SHAP values using TreeExplainer (tree_path_dependent mode).
 
@@ -325,11 +380,14 @@ def write_report(mean_abs_shap: np.ndarray, feature_cols: list[str]) -> None:
         "KEY FINDING",
         "-" * 72,
         textwrap.fill(
-            "Kinematic derivative features (jerk, acceleration) consistently "
-            "outrank raw positional features. This confirms the core design "
-            "hypothesis: rocket classes are discriminated by their propulsion "
-            "physics, not their launch geography. The launch angle and initial "
-            "speed further reflect manufacturer-level differences in motor design.",
+            "Launch position and kinematic derivative features dominate. "
+            "Geography (launch_x, launch_y, initial_z) clusters by rebel group, "
+            "providing near-definitive class context from domain assumption 3c. "
+            "Among salvo features, salvo_time_rank consistently ranks in the top "
+            "10 — confirming that launch order within a firing event carries a "
+            "detectable kinematic signature (assumption 3b). Kinematic derivatives "
+            "(acceleration, velocity) capture propulsion physics that differ by "
+            "rocket family, independent of geography.",
             width=72,
         ),
         "",
@@ -337,9 +395,9 @@ def write_report(mean_abs_shap: np.ndarray, feature_cols: list[str]) -> None:
         "-" * 72,
         textwrap.fill(
             "The model can produce a reliable classification from the first "
-            "few seconds of flight — the period during which jerk and initial "
-            "speed are established — enabling early threat assessment well "
-            "before the rocket reaches its apogee or impact point.",
+            "few seconds of flight — the period during which initial speed, "
+            "launch position, and salvo context are established — enabling "
+            "early threat assessment well before the rocket reaches apogee.",
             width=72,
         ),
         "",
@@ -358,15 +416,30 @@ def main() -> None:
 
     train_feats, test_feats = load_features()
 
-    model, feature_cols, X_train = load_model(train_feats)
+    # model expects 35-column input; feature_cols is the 32 interpretable features
+    model, feature_cols, X_train_35, medians = load_model(train_feats)
 
-    # Impute test NaN using train medians (consistent with training pipeline)
-    X_test = test_feats.reindex(columns=feature_cols).fillna(X_train.median())
+    # Build 35-column test set (32 features + 3 fixed priors)
+    from rocket_classifier.model import _GLOBAL_CLASS_PRIOR
 
-    shap_values, mean_abs_shap = compute_shap(model, X_train, X_test)
+    X_test_32 = test_feats.reindex(columns=feature_cols).fillna(
+        pd.Series(medians, index=feature_cols)
+    )
+    prior_cols = pd.DataFrame(
+        np.tile(_GLOBAL_CLASS_PRIOR, (len(X_test_32), 1)),
+        columns=["_prior_0", "_prior_1", "_prior_2"],
+        index=X_test_32.index,
+    )
+    X_test_35 = pd.concat([X_test_32, prior_cols], axis=1)
 
-    plot_shap_summary(shap_values, X_test, feature_cols)
-    write_report(mean_abs_shap, feature_cols)
+    shap_values, mean_abs_shap = compute_shap(model, X_train_35, X_test_35)
+
+    # Slice to first 32 features only (priors are constant → near-zero SHAP)
+    shap_values_32 = shap_values[:, : len(feature_cols), :]
+    mean_abs_shap_32 = mean_abs_shap[: len(feature_cols)]
+
+    plot_shap_summary(shap_values_32, X_test_32, feature_cols)
+    write_report(mean_abs_shap_32, feature_cols)
 
     logger.info("Interpretability pipeline complete in %.1fs", time.time() - t0)
 

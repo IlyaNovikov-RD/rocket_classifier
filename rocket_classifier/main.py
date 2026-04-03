@@ -5,7 +5,7 @@ runs the pre-trained LightGBM model with threshold-tuned predictions, and
 outputs ``submission.csv`` matching the competition format.
 
 No model training occurs here — the model was trained on Colab H100 via
-``research/colab_brute_force_optimization.py`` and is loaded from disk.
+``research/colab_train.py`` and is loaded from disk.
 
 Usage:
     python -m rocket_classifier.main
@@ -34,7 +34,7 @@ WEIGHTS_DIR = _ROOT / "weights"
 CACHE_DIR = _ROOT / "cache"
 OUTPUTS_DIR = _ROOT / "outputs"
 OUTPUT_PATH = OUTPUTS_DIR / "submission.csv"
-MODEL_PATH = WEIGHTS_DIR / "model.pkl"
+MODEL_PATH = WEIGHTS_DIR / "model.lgb"  # from_artifacts resolves .onnx/.lgb in order
 MEDIANS_PATH = WEIGHTS_DIR / "train_medians.npy"
 BIASES_PATH = WEIGHTS_DIR / "threshold_biases.npy"
 FEATURE_CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
@@ -44,6 +44,7 @@ FEATURE_CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
 # ---------------------------------------------------------------------------
 # Data loading helpers
 # ---------------------------------------------------------------------------
+
 
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load raw CSV data from the data directory.
@@ -88,8 +89,7 @@ def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.Dat
 
     if df is None:
         raise FileNotFoundError(
-            f"Cache not found at {cache_path} and no raw data provided. "
-            "Run: make download-all"
+            f"Cache not found at {cache_path} and no raw data provided. Run: make download-all"
         )
     logger.info("Engineering %s features (this may take ~1-2 min)...", name)
     t0 = time.time()
@@ -104,6 +104,7 @@ def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.Dat
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """Run the inference pipeline end-to-end.
@@ -121,9 +122,8 @@ def main() -> None:
     OUTPUTS_DIR.mkdir(exist_ok=True)
 
     both_caches_exist = (
-        (FEATURE_CACHE_TRAIN.exists() or FEATURE_CACHE_TRAIN.with_suffix(".feather").exists())
-        and (FEATURE_CACHE_TEST.exists() or FEATURE_CACHE_TEST.with_suffix(".feather").exists())
-    )
+        FEATURE_CACHE_TRAIN.exists() or FEATURE_CACHE_TRAIN.with_suffix(".feather").exists()
+    ) and (FEATURE_CACHE_TEST.exists() or FEATURE_CACHE_TEST.with_suffix(".feather").exists())
 
     # --- Step 1: Load ---
     # When both feature caches are present, skip loading train.csv entirely —
@@ -141,8 +141,16 @@ def main() -> None:
         _valid, errors = validate_dataframe(train_raw, has_label=True)
         if errors:
             logger.warning(
-                "Schema validation: %d/%d rows have issues (pipeline continues)",
-                len(errors), len(train_raw),
+                "Schema validation (train): %d/%d rows have issues (pipeline continues)",
+                len(errors),
+                len(train_raw),
+            )
+        _valid_t, errors_t = validate_dataframe(test_raw, has_label=False)
+        if errors_t:
+            logger.warning(
+                "Schema validation (test): %d/%d rows have issues (pipeline continues)",
+                len(errors_t),
+                len(test_raw),
             )
 
     # --- Step 3: Feature Engineering ---
@@ -167,7 +175,10 @@ def main() -> None:
         biases_path=BIASES_PATH if BIASES_PATH.exists() else None,
     )
 
-    # Select the 61 production features from the 76-column matrix
+    # Select the 32 production features from the 83-column matrix.
+    # If the cache was built with an older version of features.py that lacked
+    # salvo/group columns, reindex fills them with NaN — they will be imputed
+    # from train_medians.npy.  Delete cache/*.parquet and re-run to rebuild.
     X_test = test_feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32)
 
     # Log label distribution only when train features were loaded (cache rebuild path)
@@ -175,7 +186,9 @@ def main() -> None:
         y_train = train_feats["label"].to_numpy(dtype=int)
         logger.info(
             "Label distribution — 0: %d, 1: %d, 2: %d",
-            (y_train == 0).sum(), (y_train == 1).sum(), (y_train == 2).sum(),
+            (y_train == 0).sum(),
+            (y_train == 1).sum(),
+            (y_train == 2).sum(),
         )
 
     logger.info("Test features: %s", X_test.shape)
@@ -184,18 +197,20 @@ def main() -> None:
     y_pred = clf.predict(X_test)
     logger.info(
         "Test predictions — 0: %d, 1: %d, 2: %d",
-        (y_pred == 0).sum(), (y_pred == 1).sum(), (y_pred == 2).sum(),
+        (y_pred == 0).sum(),
+        (y_pred == 1).sum(),
+        (y_pred == 2).sum(),
     )
 
     # --- Step 6: Export submission ---
-    submission = pd.DataFrame({
-        "trajectory_ind": test_feats.index.tolist(),
-        "label": y_pred,
-    })
+    submission = pd.DataFrame(
+        {
+            "trajectory_ind": test_feats.index.tolist(),
+            "label": y_pred,
+        }
+    )
     submission = (
-        submission.set_index("trajectory_ind")
-        .reindex(sample_sub["trajectory_ind"])
-        .reset_index()
+        submission.set_index("trajectory_ind").reindex(sample_sub["trajectory_ind"]).reset_index()
     )
     submission = submission[["label", "trajectory_ind"]]
     submission.to_csv(OUTPUT_PATH, index=False)

@@ -4,8 +4,18 @@ Generates a synthetic 3D trajectory from physical parameters controlled
 by sidebar sliders, extracts physics features, and classifies in real time
 using a LightGBM model trained via GPU-accelerated Optuna search on Colab.
 
-Model: LightGBM (61 selected features, 0.9995 OOB min-recall)
-       Trained externally via colab_brute_force_optimization.py.
+Model: LightGBM (32 selected features — 25 kinematic + 7 salvo/group,
+       0.999911 OOB min-recall).
+       Trained externally via colab_train.py and validated
+       by colab_analysis.py.
+
+Note on salvo/group features in the demo:
+    The demo classifies a single synthetic trajectory in isolation.  The 7
+    salvo and rebel-group features require a multi-trajectory dataset for
+    DBSCAN clustering and cannot be computed for one trajectory alone.
+    Those 7 features are set to NaN and imputed from training medians,
+    so the demo prediction uses kinematic features only.  Production
+    inference on a full test set computes all 32 features correctly.
 
 Model loading strategy (in priority order):
     1. Local artifacts in weights/ (ONNX → native LightGBM → pkl).
@@ -29,18 +39,14 @@ from rocket_classifier.features import _extract_trajectory_features
 from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
 
 _WEIGHTS = Path(__file__).parent.parent / "weights"
-MODEL_PATH = _WEIGHTS / "model.pkl"  # base path — from_artifacts resolves .onnx/.lgb/.pkl
+MODEL_PATH = _WEIGHTS / "model.lgb"  # base path — from_artifacts resolves .onnx/.lgb
 MEDIANS_PATH = _WEIGHTS / "train_medians.npy"
 BIASES_PATH = _WEIGHTS / "threshold_biases.npy"
-_RELEASE_BASE = (
-    "https://github.com/IlyaNovikov-RD/rocket_classifier"
-    "/releases/latest/download"
-)
+_RELEASE_BASE = "https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download"
 # All backends in the order RocketClassifier.from_artifacts() tries them.
 _RELEASE_ARTIFACTS: dict[Path, str] = {
     _WEIGHTS / "model.onnx": f"{_RELEASE_BASE}/model.onnx",
     _WEIGHTS / "model.lgb": f"{_RELEASE_BASE}/model.lgb",
-    MODEL_PATH: f"{_RELEASE_BASE}/model.pkl",
     MEDIANS_PATH: f"{_RELEASE_BASE}/train_medians.npy",
     BIASES_PATH: f"{_RELEASE_BASE}/threshold_biases.npy",
 }
@@ -107,11 +113,11 @@ def load_classifier() -> RocketClassifier | None:
 
 @st.cache_data
 def get_feature_names() -> list[str]:
-    """Return the 61 production feature names in the order the model expects.
+    """Return the 32 production feature names in the order the model expects.
 
     Returns:
-        Ordered list of 61 feature name strings (subset of the 76 engineered
-        features, selected via automated backward elimination in research/).
+        Ordered list of 32 feature name strings (25 kinematic + 7 salvo/group,
+        selected via automated backward elimination in research/).
     """
     return SELECTED_FEATURES
 
@@ -201,8 +207,9 @@ def classify(
     df = pd.DataFrame({"x": pos[:, 0], "y": pos[:, 1], "z": pos[:, 2], "time_stamp": times})
     feats = _extract_trajectory_features(df)
 
-    # Build the 61-feature vector in SELECTED_FEATURES order; missing → NaN
-    # so RocketClassifier._select_and_impute fills them with training medians.
+    # Build the 32-feature vector in SELECTED_FEATURES order; missing → NaN
+    # (salvo/group features unavailable for a single trajectory — imputed from
+    # training medians by RocketClassifier._select_and_impute).
     vec = np.array([feats.get(k, np.nan) for k in SELECTED_FEATURES], dtype=np.float32)
     X = vec.reshape(1, -1)
 
@@ -303,7 +310,9 @@ def make_3d_figure(pos: np.ndarray, class_idx: int, confidence: float) -> go.Fig
 # ── UI helpers ─────────────────────────────────────────────────────────────────
 
 
-def _metric_card(col: st.delta_generator.DeltaGenerator, label: str, value: str, color: str) -> None:
+def _metric_card(
+    col: st.delta_generator.DeltaGenerator, label: str, value: str, color: str
+) -> None:
     col.markdown(
         f"""
         <div style="background:{PANEL_BG};padding:18px 20px;border-radius:8px;
@@ -409,13 +418,11 @@ def main() -> None:
         st.markdown("---")
         if clf is None:
             st.error(
-                "**model.pkl not found.**\n\n"
-                "Download the model first:\n"
-                "```\nmake download-weights\n```"
+                "**Model not found.**\n\nDownload the model first:\n```\nmake download-weights\n```"
             )
         else:
             st.success("✓ Model loaded")
-            st.caption(f"{len(feature_names)} physics features")
+            st.caption(f"{len(feature_names)} selected features (25 kinematic + 7 salvo/group)")
 
     # ── Compute ────────────────────────────────────────────────────────────────
     pos, t = generate_trajectory(initial_speed, thrust_accel, noise_sigma)
@@ -445,7 +452,8 @@ def main() -> None:
     st.markdown(
         "Drag the sidebar sliders to modify the synthetic trajectory. "
         "The LightGBM model re-classifies on every change using the same "
-        "61-feature physics pipeline as production."
+        "kinematic feature pipeline as production (salvo/group features are "
+        "unavailable for a single synthetic trajectory and are imputed from medians)."
     )
 
     # ── Metric cards ───────────────────────────────────────────────────────────
