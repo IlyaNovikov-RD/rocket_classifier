@@ -2,16 +2,29 @@
 
 Assumptions:
     - z is altitude (height plane); x, y are horizontal coordinates.
-    - Shtuchia has flat terrain: no terrain correction needed.
+    - Flat terrain: no terrain correction needed.
     - Rockets follow standard frictionless ballistic trajectories.
     - Per-trajectory aggregation: one feature vector per traj_ind.
     - Time deltas derived from time_stamp column (parsed as datetime).
+    - Rockets are fired in spatiotemporal salvos by geographically
+      concentrated rebel groups (domain assumptions 3a-3c).
 """
 
 import logging
 
 import numpy as np
 import pandas as pd
+
+# DBSCAN parameters for salvo and rebel-group clustering.
+# Spatiotemporal (salvo): eps=0.5 in StandardScaler-normalised
+# (launch_x, launch_y, launch_time_s) space; min_samples=2.
+# Pure-spatial (rebel group): eps=0.25 in normalised (launch_x, launch_y)
+# space; min_samples=3.  Both validated across multiple independent
+# feature-selection runs on the full training set.
+_SALVO_EPS = 0.5
+_SALVO_MIN_SAMPLES = 2
+_GROUP_EPS = 0.25
+_GROUP_MIN_SAMPLES = 3
 
 logger = logging.getLogger(__name__)
 
@@ -162,9 +175,7 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
 
         # Azimuth of initial velocity (heading in horizontal plane)
         # When speed is zero, azimuth is undefined — arctan2(0,0)=0 is meaningless
-        feats["launch_angle_azimuth"] = (
-            float(np.arctan2(vy[0], vx[0])) if speed[0] > 0 else np.nan
-        )
+        feats["launch_angle_azimuth"] = float(np.arctan2(vy[0], vx[0])) if speed[0] > 0 else np.nan
 
         # Initial speed components
         feats["initial_speed"] = float(speed[0])
@@ -262,9 +273,7 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     # Absolute time to apogee — use direct timestamp subtraction to avoid
     # nansum gaps from duplicate-timestamp NaNs understating the true elapsed time
     if apogee_idx > 0:
-        feats["time_to_apogee_s"] = float(
-            (times[apogee_idx] - times[0]).astype(np.float64) / 1e9
-        )
+        feats["time_to_apogee_s"] = float((times[apogee_idx] - times[0]).astype(np.float64) / 1e9)
     else:
         feats["time_to_apogee_s"] = 0.0
 
@@ -293,13 +302,138 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     return feats
 
 
+def _add_salvo_group_features(
+    result: pd.DataFrame,
+    launch_times: pd.Series,
+) -> pd.DataFrame:
+    """Add salvo and rebel-group clustering features to the feature matrix.
+
+    Implements domain assumptions 3a-3c from the problem specification:
+
+    * **3b — Rockets fired in salvos**: spatiotemporal DBSCAN on
+      ``(launch_x, launch_y, launch_time_s)`` groups trajectories fired
+      together.  Produces ``salvo_size``, ``salvo_duration_s``,
+      ``salvo_spatial_spread_m``, and ``salvo_time_rank``.
+
+    * **3c — Geographically concentrated groups, each purchasing independently**:
+      pure-spatial DBSCAN on ``(launch_x, launch_y)`` identifies persistent
+      rebel bases.  Because each group purchases its own rocket supply
+      independently, rockets from the same base are the same type.
+      Produces ``group_total_rockets``, ``group_n_salvos``, and
+      ``group_max_salvo_size`` (proxy for assumption 3a — launcher type).
+
+    Args:
+        result: Per-trajectory feature DataFrame (index=traj_ind) containing
+            ``launch_x`` and ``launch_y`` columns.
+        launch_times: Series indexed by ``traj_ind`` with the first
+            timestamp of each trajectory.
+
+    Returns:
+        ``result`` with 7 new columns appended:
+        ``salvo_size``, ``salvo_duration_s``, ``salvo_spatial_spread_m``,
+        ``salvo_time_rank``, ``group_total_rockets``, ``group_n_salvos``,
+        ``group_max_salvo_size``.
+    """
+    from sklearn.cluster import DBSCAN
+    from sklearn.preprocessing import StandardScaler
+
+    result = result.copy()
+    result["_lt_s"] = launch_times.reindex(result.index).astype(np.int64) / 1e9
+
+    # ── Salvo clustering (spatiotemporal) ──────────────────────────────────
+    cluster_input = result[["launch_x", "launch_y", "_lt_s"]].fillna(0.0)
+    cluster_scaled = StandardScaler().fit_transform(cluster_input)
+    raw_salvo = DBSCAN(eps=_SALVO_EPS, min_samples=_SALVO_MIN_SAMPLES, n_jobs=-1).fit_predict(
+        cluster_scaled
+    )
+
+    # Noise points (label=-1) each become their own singleton salvo
+    next_id = int(raw_salvo.max()) + 1
+    salvo_ids = raw_salvo.copy()
+    for i in range(len(salvo_ids)):
+        if salvo_ids[i] == -1:
+            salvo_ids[i] = next_id
+            next_id += 1
+    result["_salvo_id"] = salvo_ids
+
+    # Per-salvo statistics
+    salvo_rows: list[dict] = []
+    for _sid, grp in result.groupby("_salvo_id"):
+        n = len(grp)
+        lx = grp["launch_x"].values
+        ly = grp["launch_y"].values
+        lt = grp["_lt_s"].values
+        spread = dur = 0.0
+        if n > 1:
+            dur = float(lt.max() - lt.min())
+            if n <= 1000:
+                # Exact max pairwise distance for small salvos
+                dx = lx[:, None] - lx[None, :]
+                dy = ly[:, None] - ly[None, :]
+                spread = float(np.sqrt(dx**2 + dy**2).max())
+            else:
+                # Bounding-box diagonal for large salvos — avoids O(n²) memory.
+                # For dense point clouds the BB diagonal ≈ max pairwise distance.
+                spread = float(np.sqrt((lx.max() - lx.min()) ** 2 + (ly.max() - ly.min()) ** 2))
+        ranks = pd.Series(lt).rank(method="first").astype(int).values
+        for i, tid in enumerate(grp.index):
+            salvo_rows.append(
+                {
+                    "traj_ind": tid,
+                    "salvo_size": n,
+                    "salvo_duration_s": dur,
+                    "salvo_spatial_spread_m": spread,
+                    "salvo_time_rank": int(ranks[i]),
+                }
+            )
+    result = result.join(pd.DataFrame(salvo_rows).set_index("traj_ind"))
+
+    # ── Rebel-group clustering (pure-spatial) ──────────────────────────────
+    spatial_input = result[["launch_x", "launch_y"]].fillna(0.0)
+    spatial_scaled = StandardScaler().fit_transform(spatial_input)
+    raw_group = DBSCAN(eps=_GROUP_EPS, min_samples=_GROUP_MIN_SAMPLES, n_jobs=-1).fit_predict(
+        spatial_scaled
+    )
+
+    # Auto-tune GROUP_EPS if < 2 groups found (handles unusual spatial layouts)
+    n_groups = len(set(raw_group[raw_group >= 0]))
+    if n_groups < 2:
+        for eps_try in [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75]:
+            lbls = DBSCAN(eps=eps_try, min_samples=_GROUP_MIN_SAMPLES, n_jobs=-1).fit_predict(
+                spatial_scaled
+            )
+            ng = len(set(lbls[lbls >= 0]))
+            if 2 <= ng <= 20:
+                raw_group = lbls
+                logger.info("Auto-selected GROUP_EPS=%.2f → %d rebel groups", eps_try, ng)
+                break
+
+    next_gid = int(raw_group.max()) + 1
+    group_ids = raw_group.copy()
+    for i in range(len(group_ids)):
+        if group_ids[i] == -1:
+            group_ids[i] = next_gid
+            next_gid += 1
+    result["_rebel_group_id"] = group_ids
+
+    group_stats = result.groupby("_rebel_group_id").agg(
+        group_total_rockets=("_rebel_group_id", "count"),
+        group_n_salvos=("_salvo_id", "nunique"),
+        group_max_salvo_size=("salvo_size", "max"),
+    )
+    result = result.join(group_stats, on="_rebel_group_id")
+
+    result = result.drop(columns=["_lt_s", "_salvo_id", "_rebel_group_id"])
+    return result
+
+
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """Aggregate point-level radar data into a per-trajectory feature matrix.
 
     Parses timestamps, sorts each trajectory chronologically, then calls
-    ``_extract_trajectory_features`` for every unique ``traj_ind``. The
-    result is a single row per trajectory with 76 physics-derived features
-    (plus an optional ``label`` column when training data is supplied).
+    ``_extract_trajectory_features`` for every unique ``traj_ind``.  After
+    kinematic feature extraction, domain-informed salvo and rebel-group
+    features are appended via DBSCAN clustering (assumptions 3a-3c).
 
     Args:
         df: Raw point-level DataFrame with columns ``traj_ind``,
@@ -308,22 +442,23 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     Returns:
         Per-trajectory feature DataFrame with ``traj_ind`` as the index.
-        Shape is (n_trajectories, 76) without label, (n_trajectories, 77)
-        with label. All feature values are float64; NaN indicates a feature
-        that could not be computed for a given trajectory.
+        Shape is (n_trajectories, 83) without label, (n_trajectories, 84)
+        with label — 76 kinematic features plus 7 salvo/group features.
+        All values are float64; NaN indicates a feature that could not be
+        computed for a given trajectory.
     """
     df = df.copy()
     df["time_stamp"] = pd.to_datetime(df["time_stamp"], format="mixed")
-
-    # Sort within each trajectory by time
     df = df.sort_values(["traj_ind", "time_stamp"])
 
     has_label = "label" in df.columns
     n_trajectories = df["traj_ind"].nunique()
     logger.info("Building features for %d trajectories...", n_trajectories)
 
-    groups = df.groupby("traj_ind", sort=False)
+    # Extract launch timestamp (first ping per trajectory, after time-sorting)
+    launch_times = df.groupby("traj_ind")["time_stamp"].first()
 
+    groups = df.groupby("traj_ind", sort=False)
     records: list[dict] = []
     for traj_id, group in groups:
         feats = _extract_trajectory_features(group.reset_index(drop=True))
@@ -333,5 +468,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         records.append(feats)
 
     result = pd.DataFrame(records).set_index("traj_ind")
+
+    # Append salvo + rebel-group features (domain assumptions 3a-3c)
+    result = _add_salvo_group_features(result, launch_times)
+
     logger.info("Feature matrix built: shape=%s", result.shape)
     return result

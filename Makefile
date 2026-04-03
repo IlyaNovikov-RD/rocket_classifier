@@ -38,10 +38,10 @@ lock:
 	uv lock
 
 download-weights:
-	uv run python download_weights.py
+	uv run python scripts/download_weights.py
 
 download-all:
-	uv run python download_weights.py --with-caches
+	uv run python scripts/download_weights.py --with-caches
 
 run:
 	uv run python -m rocket_classifier.main
@@ -53,7 +53,7 @@ visualize:
 	uv run python research/visualize.py
 
 export-model:
-	uv run python export_fast_models.py
+	uv run python scripts/export_fast_models.py
 
 pipeline: download-all run interpret
 	@echo "Pipeline complete. submission.csv and assets/ are up to date."

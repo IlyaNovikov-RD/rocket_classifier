@@ -1,16 +1,12 @@
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
-*.pyo
 .pytest_cache/
 .ruff_cache/
 
 # ── Environments ──────────────────────────────────────────────────────────────
 .venv/
 .env
-
-# ── Lock files (uv.lock is tracked; poetry.lock is not) ──────────────────────
-poetry.lock
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
@@ -19,10 +15,8 @@ Thumbs.db
 # ── Data (large CSVs, not tracked) ───────────────────────────────────────────
 data/
 
-# ── Feature caches (Parquet + Feather sidecars, regenerated from data/) ───────
+# ── Feature caches (regenerated from data/ or downloaded from GitHub Release) ─
 cache/
-*.parquet
-*.feather
 
 # ── Model artifacts (served from latest GitHub Release) ──────────────────────
 # Download with: make download-weights
@@ -30,9 +24,6 @@ weights/
 
 # ── Pipeline outputs ──────────────────────────────────────────────────────────
 outputs/
-
-# ── Local experiment artifacts ────────────────────────────────────────────────
-colab_brute_force_results/
 
 # ── Personal / IDE files ──────────────────────────────────────────────────────
 .claude/

@@ -95,7 +95,7 @@ class TrajectoryPoint(BaseModel):
     def z_consistent_with_altitude(self) -> Self:
         """Warn when altitude appears implausibly large (> 100 km).
 
-        Shtuchia's threat envelope does not extend to orbital altitudes.
+        The operational scenario does not extend to orbital altitudes.
         Values above 100 km are not rejected outright (they may be sensor
         artefacts), but a warning is emitted so the anomaly is visible in
         structured logs.

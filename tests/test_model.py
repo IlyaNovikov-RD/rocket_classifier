@@ -5,7 +5,7 @@ Tests cover:
   - RocketClassifier._select_and_impute (no NaN, partial NaN, all-NaN column)
   - RocketClassifier.predict / predict_proba via a stub model (no disk artifacts)
   - Bias adjustment: large bias shifts argmax toward the favoured class
-  - SELECTED_FEATURES contract: exactly 61 unique entries
+  - SELECTED_FEATURES contract: exactly 32 unique entries
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from rocket_classifier.model import (
     min_class_recall,
 )
 
-N_FEATURES = 61
+N_FEATURES = 32
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ def _make_clf(proba: np.ndarray) -> RocketClassifier:
 
 
 class TestSelectedFeatures:
-    def test_exactly_61_features(self) -> None:
+    def test_exactly_32_features(self) -> None:
         assert len(SELECTED_FEATURES) == N_FEATURES
 
     def test_no_duplicates(self) -> None:
@@ -211,7 +211,9 @@ class TestRocketClassifierPredict:
         """Bias on class 2 must flip the prediction just as predict() does."""
         proba_fixed = np.array([[0.6, 0.3, 0.1]])
         biases = np.array([0.0, 0.0, 10.0])
-        clf = RocketClassifier(model=_StubModel(proba_fixed), medians=np.zeros(N_FEATURES), biases=biases)
+        clf = RocketClassifier(
+            model=_StubModel(proba_fixed), medians=np.zeros(N_FEATURES), biases=biases
+        )
         X = np.zeros((1, N_FEATURES))
         preds, _ = clf.predict_with_proba(X)
         assert preds[0] == 2

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Download production model artifacts from GitHub Release.
 
-Downloads model.pkl, train_medians.npy, and threshold_biases.npy from
-the latest GitHub Release into weights/. Required before running
-the inference pipeline (``python -m rocket_classifier.main``).
+Downloads model.onnx, model.lgb, train_medians.npy, and
+threshold_biases.npy from the latest GitHub Release into weights/.
+Required before running the inference pipeline
+(``python -m rocket_classifier.main``).
 
 Usage:
     python download_weights.py
@@ -16,15 +17,11 @@ import sys
 import urllib.request
 from pathlib import Path
 
-RELEASE_BASE = (
-    "https://github.com/IlyaNovikov-RD/rocket_classifier"
-    "/releases/latest/download"
-)
+RELEASE_BASE = "https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download"
 
 ARTIFACTS = [
-    "model.onnx",           # fastest inference backend (preferred)
-    "model.lgb",            # native LightGBM fallback
-    "model.pkl",            # legacy joblib fallback
+    "model.onnx",  # fastest inference backend (preferred)
+    "model.lgb",  # native LightGBM fallback
     "train_medians.npy",
     "threshold_biases.npy",
 ]
@@ -36,7 +33,7 @@ CACHE_ARTIFACTS = [
     "cache_test_features.parquet",
 ]
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parent.parent
 WEIGHTS_DIR = ROOT / "weights"
 CACHE_DIR = ROOT / "cache"
 WEIGHTS_DIR.mkdir(exist_ok=True)

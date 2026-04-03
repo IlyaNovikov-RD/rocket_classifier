@@ -14,14 +14,13 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy production source only (no data, no research, no weights)
 COPY rocket_classifier/ ./rocket_classifier/
-COPY download_weights.py ./
+COPY scripts/download_weights.py ./scripts/
 
 # Install the project itself
 RUN uv sync --frozen --no-dev
 
 # Download model artifacts from GitHub Release at build time
-# weights/ is created by download_weights.py
-RUN uv run python download_weights.py
+RUN uv run python scripts/download_weights.py
 
 # Pre-create runtime directories
 RUN mkdir -p cache outputs
