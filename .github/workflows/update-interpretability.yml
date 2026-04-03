@@ -40,6 +40,13 @@ jobs:
       - name: Download model artifacts + feature caches
         run: uv run python scripts/download_weights.py --with-caches
 
+      - name: Download sample_submission.csv
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          gh release download --pattern "sample_submission.csv" --dir data
+
       - name: Run inference pipeline
         run: uv run python -m rocket_classifier.main
 
