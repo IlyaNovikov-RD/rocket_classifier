@@ -491,6 +491,8 @@ for _sid, grp in feats.groupby("salvo_id"):
                 "salvo_time_rank": int(ranks[i]),
             }
         )
+_salvo_cols = ["salvo_size", "salvo_duration_s", "salvo_spatial_spread_m", "salvo_time_rank"]
+feats = feats.drop(columns=[c for c in _salvo_cols if c in feats.columns])
 feats = feats.join(pd.DataFrame(salvo_rows).set_index("traj_ind"), how="left")
 
 # ── Rebel-group clustering — assumption 3c ───────────────────────────────────
@@ -525,6 +527,8 @@ group_stats = feats.groupby("rebel_group_id").agg(
     group_n_salvos=("salvo_id", "nunique"),
     group_max_salvo_size=("salvo_size", "max"),
 )
+_group_cols = ["group_total_rockets", "group_n_salvos", "group_max_salvo_size"]
+feats = feats.drop(columns=[c for c in _group_cols if c in feats.columns])
 feats = feats.join(group_stats, on="rebel_group_id")
 
 # Salvo purity — empirical validation of assumption 3c
