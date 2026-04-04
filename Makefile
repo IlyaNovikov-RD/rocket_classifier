@@ -4,20 +4,25 @@
 #   https://docs.astral.sh/uv/getting-started/installation/
 #
 # Usage:
-#   make install    Install all dependencies via uv
-#   make test       Run the full pytest suite
-#   make lint       Check code quality with ruff
-#   make format     Auto-format source files with ruff
-#   make demo       Launch the Streamlit interactive demo
-#   make lock       Regenerate uv.lock from pyproject.toml
-#   make download-models  Download model + medians + biases from GitHub Release
+#   make install       Install all dependencies via uv
+#   make test          Run the full pytest suite
+#   make lint          Check code quality with ruff
+#   make format        Auto-format source files with ruff
+#   make demo          Launch the Streamlit interactive demo
+#   make lock          Regenerate uv.lock from pyproject.toml
+#   make download-models   Download model + medians + biases from GitHub Release
 #   make download-all      Download model artifacts + feature caches from GitHub Release
 #   make run               Run inference pipeline → submission.csv
 #   make interpret         Regenerate SHAP plot + report after a new model is deployed
 #   make visualize         Regenerate demo.png (physics feature visualization)
 #   make pipeline          Full local pipeline: download-all → run → interpret
+#
+# After training a new model (research/train.py):
+#   make release TAG=v1.x.0 NOTES="Description of changes"
+#   This creates a GitHub Release with all required artifacts and triggers
+#   the post-release pipeline (ONNX export, inference, SHAP, submission.csv).
 
-.PHONY: install test lint format demo lock download-models download-all run interpret visualize pipeline export-model
+.PHONY: install test lint format demo lock download-models download-all run interpret visualize pipeline export-model release
 
 install:
 	uv sync --group dev
@@ -59,3 +64,30 @@ export-model:
 
 pipeline: download-all run interpret
 	@echo "Pipeline complete. submission.csv and assets/ are up to date."
+
+# Create a GitHub Release with all required artifacts.
+# Usage: make release TAG=v1.x.0 NOTES="What changed"
+# Requires: models/ and cache/ populated (run research/train.py first).
+# After publishing, the post-release CI pipeline triggers automatically.
+release:
+	@test -n "$(TAG)"   || (echo "Usage: make release TAG=v1.x.0 NOTES='...'"; exit 1)
+	@test -n "$(NOTES)" || (echo "Usage: make release TAG=v1.x.0 NOTES='...'"; exit 1)
+	@test -f models/model.lgb           || (echo "models/model.lgb not found — run research/train.py first"; exit 1)
+	@test -f models/train_medians.npy   || (echo "models/train_medians.npy not found"; exit 1)
+	@test -f models/threshold_biases.npy || (echo "models/threshold_biases.npy not found"; exit 1)
+	@test -f cache/cache_train_features.parquet || (echo "cache/cache_train_features.parquet not found"; exit 1)
+	@test -f cache/cache_test_features.parquet  || (echo "cache/cache_test_features.parquet not found"; exit 1)
+	@test -f data/test.csv              || (echo "data/test.csv not found"; exit 1)
+	@test -f data/sample_submission.csv || (echo "data/sample_submission.csv not found"; exit 1)
+	gh release create $(TAG) \
+	  models/model.lgb \
+	  models/train_medians.npy \
+	  models/threshold_biases.npy \
+	  training_report.json \
+	  cache/cache_train_features.parquet \
+	  cache/cache_test_features.parquet \
+	  data/test.csv \
+	  data/sample_submission.csv \
+	  --title "$(TAG): $(NOTES)" \
+	  --notes "$(NOTES)"
+	@echo "Release $(TAG) created. Post-release pipeline will run automatically."
