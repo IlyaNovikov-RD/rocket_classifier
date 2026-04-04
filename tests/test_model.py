@@ -6,14 +6,21 @@ Tests cover:
   - RocketClassifier.predict / predict_proba via a stub model (no disk artifacts)
   - Bias adjustment: large bias shifts argmax toward the favoured class
   - SELECTED_FEATURES contract: exactly 32 unique entries
+  - _GLOBAL_CLASS_PRIOR contract: valid probability distribution
+  - Consensus parameter contract: main.py values match training_report.json
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
+from rocket_classifier.main import _PROX_POS_PRECISION, _PROX_TIME_WINDOW_S
 from rocket_classifier.model import (
+    _GLOBAL_CLASS_PRIOR,
     PRODUCTION_BIASES,
     SELECTED_FEATURES,
     RocketClassifier,
@@ -94,6 +101,22 @@ class TestMinClassRecall:
         result = min_class_recall(y, y)
         assert isinstance(result, float)
 
+    def test_absent_class_ignored(self) -> None:
+        """Classes absent from y_true must not affect the metric.
+
+        train.py has a Colab fallback that reimplements this function.
+        Both must agree: absent classes are skipped, not counted as 0 recall.
+        If they diverge, Optuna optimises a different metric than what is reported.
+        """
+        # Only class 1 present in y_true — classes 0 and 2 are absent.
+        y_true = np.array([1, 1, 1])
+        y_pred = np.array([1, 1, 1])
+        assert min_class_recall(y_true, y_pred) == pytest.approx(1.0)
+
+        # Partial correct: class 1 recall = 2/3.
+        y_pred2 = np.array([1, 1, 0])
+        assert min_class_recall(y_true, y_pred2) == pytest.approx(2 / 3)
+
 
 # ---------------------------------------------------------------------------
 # RocketClassifier._select_and_impute
@@ -136,6 +159,40 @@ class TestSelectAndImpute:
         X_copy = X.copy()
         clf._select_and_impute(X)
         np.testing.assert_array_equal(X, X_copy)  # original untouched
+
+
+# ---------------------------------------------------------------------------
+# RocketClassifier._append_priors
+# ---------------------------------------------------------------------------
+
+
+class TestAppendPriors:
+    def test_output_shape_adds_three_columns(self) -> None:
+        """_append_priors must add exactly 3 columns (one per class).
+
+        If _GLOBAL_CLASS_PRIOR shape is wrong or concatenation fails,
+        the model receives wrong-shaped input and predicts silently incorrect classes.
+        """
+        clf = _make_clf(np.ones((1, 3)) / 3)
+        X = np.zeros((5, N_FEATURES))
+        out = clf._append_priors(X)
+        assert out.shape == (5, N_FEATURES + 3)
+
+    def test_appended_values_match_global_prior(self) -> None:
+        """Every row of the appended prior columns must equal _GLOBAL_CLASS_PRIOR."""
+        clf = _make_clf(np.ones((1, 3)) / 3)
+        X = np.zeros((4, N_FEATURES))
+        out = clf._append_priors(X)
+        prior_cols = out[:, N_FEATURES:]  # last 3 columns
+        for row in prior_cols:
+            np.testing.assert_allclose(row, _GLOBAL_CLASS_PRIOR, rtol=1e-6)
+
+    def test_original_columns_unchanged(self) -> None:
+        """First 32 columns must be unchanged after appending priors."""
+        clf = _make_clf(np.ones((1, 3)) / 3)
+        X = np.arange(N_FEATURES * 3, dtype=float).reshape(3, N_FEATURES)
+        out = clf._append_priors(X)
+        np.testing.assert_array_equal(out[:, :N_FEATURES], X)
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +245,69 @@ class TestRocketClassifierPredict:
     def test_production_biases_shape(self) -> None:
         assert PRODUCTION_BIASES.shape == (3,)
         assert PRODUCTION_BIASES[0] == pytest.approx(0.0)
+
+    def test_production_biases_all_finite(self) -> None:
+        """No bias entry may be NaN or inf — that would silently break argmax."""
+        assert np.isfinite(PRODUCTION_BIASES).all()
+
+    def test_model_feature_count(self) -> None:
+        """models/model.lgb must expect exactly 35 features (32 selected + 3 priors).
+
+        The LightGBM native backend does not validate feature count at inference
+        time — wrong-shaped input produces silently incorrect predictions.
+        This test catches the case where a model trained with different features
+        is uploaded to models/.
+
+        Skipped if models/model.lgb is not present (CI without downloaded artifacts).
+        """
+        import lightgbm as lgb
+
+        model_path = Path(__file__).parent.parent / "models" / "model.lgb"
+        if not model_path.exists():
+            pytest.skip("models/model.lgb not found — skipping feature count check")
+        booster = lgb.Booster(model_file=str(model_path))
+        expected = len(SELECTED_FEATURES) + 3  # 32 base + 3 rebel-group priors
+        assert booster.num_feature() == expected, (
+            f"model.lgb expects {booster.num_feature()} features, "
+            f"but pipeline provides {expected} (32 selected + 3 priors). "
+            "Re-train or re-export the model."
+        )
+
+    def test_global_class_prior_is_valid_distribution(self) -> None:
+        """_GLOBAL_CLASS_PRIOR must be a valid probability distribution.
+
+        If the class counts in model.py are edited incorrectly, inference
+        silently uses wrong priors — this catches that.
+        """
+        assert _GLOBAL_CLASS_PRIOR.shape == (3,), "Prior must have one entry per class"
+        assert (_GLOBAL_CLASS_PRIOR >= 0).all(), "All prior probabilities must be >= 0"
+        assert (_GLOBAL_CLASS_PRIOR <= 1).all(), "All prior probabilities must be <= 1"
+        assert _GLOBAL_CLASS_PRIOR.sum() == pytest.approx(1.0, abs=1e-6), (
+            "Prior probabilities must sum to 1.0"
+        )
+
+    def test_consensus_parameters_match_training_report(self) -> None:
+        """Production consensus parameters must match what was used during training.
+
+        If _PROX_POS_PRECISION or _PROX_TIME_WINDOW_S in main.py drifts from
+        the values in training_report.json, production consensus behaves
+        differently from how it was validated.
+
+        Skipped if training_report.json does not exist (CI without artifacts).
+        """
+        report_path = Path(__file__).parent.parent / "training_report.json"
+        if not report_path.exists():
+            pytest.skip("training_report.json not found — skipping consensus sync check")
+        with open(report_path) as f:
+            report = json.load(f)
+        assert _PROX_POS_PRECISION == report["prox_pos_precision"], (
+            f"main.py _PROX_POS_PRECISION={_PROX_POS_PRECISION} != "
+            f"training_report.json prox_pos_precision={report['prox_pos_precision']}"
+        )
+        assert _PROX_TIME_WINDOW_S == report["prox_time_window_s"], (
+            f"main.py _PROX_TIME_WINDOW_S={_PROX_TIME_WINDOW_S} != "
+            f"training_report.json prox_time_window_s={report['prox_time_window_s']}"
+        )
 
     def test_predict_with_proba_matches_predict_and_predict_proba(self) -> None:
         """predict_with_proba must return the same results as calling predict and

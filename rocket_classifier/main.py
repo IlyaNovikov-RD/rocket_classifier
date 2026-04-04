@@ -1,11 +1,10 @@
-"""Inference pipeline: Load features → Classify → Export submission.csv.
+"""Inference pipeline: Load features → Classify → Consensus → Export submission.csv.
 
 This is the production entrypoint. It loads pre-computed feature matrices,
-runs the pre-trained LightGBM model with threshold-tuned predictions, and
-outputs ``submission.csv`` matching the competition format.
+runs the pre-trained LightGBM model with threshold-tuned predictions, applies
+proximity-based salvo consensus, and outputs ``submission.csv``.
 
-No model training occurs here — the model was trained on Colab H100 via
-``research/colab_train.py`` and is loaded from disk.
+No model training occurs here — training is done via ``research/train.py``.
 
 Usage:
     python -m rocket_classifier.main
@@ -30,13 +29,13 @@ logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).parent.parent
 DATA_DIR = _ROOT / "data"
-WEIGHTS_DIR = _ROOT / "weights"
+MODELS_DIR = _ROOT / "models"
 CACHE_DIR = _ROOT / "cache"
 OUTPUTS_DIR = _ROOT / "outputs"
 OUTPUT_PATH = OUTPUTS_DIR / "submission.csv"
-MODEL_PATH = WEIGHTS_DIR / "model.lgb"  # from_artifacts resolves .onnx/.lgb in order
-MEDIANS_PATH = WEIGHTS_DIR / "train_medians.npy"
-BIASES_PATH = WEIGHTS_DIR / "threshold_biases.npy"
+MODEL_PATH = MODELS_DIR / "model.lgb"  # from_artifacts resolves .onnx/.lgb in order
+MEDIANS_PATH = MODELS_DIR / "train_medians.npy"
+BIASES_PATH = MODELS_DIR / "threshold_biases.npy"
 FEATURE_CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
 FEATURE_CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
 
@@ -106,6 +105,76 @@ def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.Dat
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Proximity consensus helpers (pure functions — no I/O, testable)
+# ---------------------------------------------------------------------------
+
+_PROX_POS_PRECISION = 2   # decimal places for rounding launch_x / launch_y
+_PROX_TIME_WINDOW_S = 60  # max total span (s) of a salvo group
+
+
+def build_proximity_groups(
+    launch_x: "pd.Series",
+    launch_y: "pd.Series",
+    launch_lt_s: "pd.Series",
+) -> np.ndarray:
+    """Assign each trajectory to a proximity group.
+
+    Rockets at the same rounded launch position fired within
+    ``_PROX_TIME_WINDOW_S`` seconds of the group's first rocket belong to
+    the same group (absolute-span split — no time-chaining).
+
+    Args:
+        launch_x: launch x-coordinates indexed by traj_ind.
+        launch_y: launch y-coordinates indexed by traj_ind.
+        launch_lt_s: launch timestamps in seconds since epoch, same index.
+
+    Returns:
+        Integer array of group IDs aligned with the input index.
+    """
+    prox_df = pd.DataFrame({
+        "lx_r": launch_x.fillna(0.0).round(_PROX_POS_PRECISION),
+        "ly_r": launch_y.fillna(0.0).round(_PROX_POS_PRECISION),
+        "lt_s": launch_lt_s,
+    }, index=launch_x.index)
+
+    prox_map: dict[int, int] = {}
+    next_gid = 0
+    for (_, _), pos_grp in prox_df.groupby(["lx_r", "ly_r"], sort=False):
+        pos_sorted = pos_grp.sort_values("lt_s")
+        salvo_start: float | None = None
+        for tid, row in pos_sorted.iterrows():
+            t = float(row["lt_s"])
+            if salvo_start is None or t - salvo_start > _PROX_TIME_WINDOW_S:
+                salvo_start = t
+                gid = next_gid
+                next_gid += 1
+            prox_map[tid] = gid
+
+    return np.array([prox_map[t] for t in launch_x.index], dtype=np.int32)
+
+
+def apply_salvo_consensus(y_pred: np.ndarray, group_ids: np.ndarray) -> np.ndarray:
+    """Apply strict-majority mode vote within each proximity group of size ≥ 2.
+
+    Args:
+        y_pred: integer prediction array of shape (N,).
+        group_ids: integer group ID array of shape (N,), aligned with y_pred.
+
+    Returns:
+        Copy of ``y_pred`` with borderline predictions corrected by consensus.
+    """
+    result = y_pred.copy()
+    sizes = pd.Series(group_ids).value_counts()
+    for gid in sizes[sizes >= 2].index:
+        mask = group_ids == gid
+        vals, counts = np.unique(y_pred[mask], return_counts=True)
+        top = np.argmax(counts)
+        if counts[top] > mask.sum() - counts[top]:
+            result[mask] = vals[top]
+    return result
+
+
 def main() -> None:
     """Run the inference pipeline end-to-end.
 
@@ -115,6 +184,9 @@ def main() -> None:
         3. Engineer per-trajectory features (Feather for speed, Parquet for portability).
         4. Load the pre-trained LightGBM classifier.
         5. Generate predictions for the test set.
+        5b. Apply proximity-based salvo consensus (assumptions 3b/3c):
+            rockets fired from the same position within 60 s share a class —
+            mode voting corrects borderline predictions without using labels.
         6. Export ``submission.csv``.
     """
     t_start = time.time()
@@ -164,7 +236,7 @@ def main() -> None:
     # --- Step 4: Load classifier ---
     if not MODEL_PATH.exists():
         logger.error(
-            "Model not found at %s. Run: make download-weights",
+            "Model not found at %s. Run: make download-models",
             MODEL_PATH,
         )
         return
@@ -197,6 +269,36 @@ def main() -> None:
     y_pred = clf.predict(X_test)
     logger.info(
         "Test predictions — 0: %d, 1: %d, 2: %d",
+        (y_pred == 0).sum(),
+        (y_pred == 1).sum(),
+        (y_pred == 2).sum(),
+    )
+
+    # --- Step 5b: Proximity consensus ---
+    # Assumptions 3b/3c: rockets in a salvo share the same launcher → same type.
+    # Group by launch position + 60 s window, apply mode vote (strict majority).
+    # Parameters match research/train.py exactly.
+
+    # Load timestamps for grouping. test_raw may be None on the fast path.
+    _ts_src = test_raw if test_raw is not None else pd.read_csv(
+        DATA_DIR / "test.csv", usecols=["traj_ind", "time_stamp"]
+    )
+    _ts_src = _ts_src.copy()
+    _ts_src["time_stamp"] = pd.to_datetime(_ts_src["time_stamp"], format="mixed")
+    _launch_lt_s = (
+        _ts_src.groupby("traj_ind")["time_stamp"]
+        .min()
+        .reindex(test_feats.index)
+        .astype(np.int64) / 1e9
+    )
+
+    _group_ids = build_proximity_groups(
+        test_feats["launch_x"], test_feats["launch_y"], _launch_lt_s
+    )
+    y_pred = apply_salvo_consensus(y_pred, _group_ids)
+
+    logger.info(
+        "Post-consensus predictions — 0: %d, 1: %d, 2: %d",
         (y_pred == 0).sum(),
         (y_pred == 1).sum(),
         (y_pred == 2).sum(),

@@ -2,12 +2,11 @@
 
 Generates a synthetic 3D trajectory from physical parameters controlled
 by sidebar sliders, extracts physics features, and classifies in real time
-using a LightGBM model trained via GPU-accelerated Optuna search on Colab.
+using a LightGBM model trained via GPU-accelerated Optuna + salvo consensus.
 
-Model: LightGBM (32 selected features — 25 kinematic + 7 salvo/group,
-       0.999911 OOB min-recall).
-       Trained externally via colab_train.py and validated
-       by colab_analysis.py.
+Model: LightGBM (32 selected features — 25 kinematic + 7 salvo/group).
+       Trained via research/train.py → 1.000000 OOB min-recall with
+       proximity consensus (0.999866 raw).
 
 Note on salvo/group features in the demo:
     The demo classifies a single synthetic trajectory in isolation.  The 7
@@ -18,7 +17,7 @@ Note on salvo/group features in the demo:
     inference on a full test set computes all 32 features correctly.
 
 Model loading strategy (in priority order):
-    1. Local artifacts in weights/ (ONNX → native LightGBM → pkl).
+    1. Local artifacts in models/ (ONNX → native LightGBM → pkl).
     2. Remote download from the GitHub Release asset (automatic fallback).
 
 Run with:
@@ -38,15 +37,15 @@ import streamlit as st
 from rocket_classifier.features import _extract_trajectory_features
 from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
 
-_WEIGHTS = Path(__file__).parent.parent / "weights"
-MODEL_PATH = _WEIGHTS / "model.lgb"  # base path — from_artifacts resolves .onnx/.lgb
-MEDIANS_PATH = _WEIGHTS / "train_medians.npy"
-BIASES_PATH = _WEIGHTS / "threshold_biases.npy"
+_MODELS = Path(__file__).parent.parent / "models"
+MODEL_PATH = _MODELS / "model.lgb"  # base path — from_artifacts resolves .onnx/.lgb
+MEDIANS_PATH = _MODELS / "train_medians.npy"
+BIASES_PATH = _MODELS / "threshold_biases.npy"
 _RELEASE_BASE = "https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download"
 # All backends in the order RocketClassifier.from_artifacts() tries them.
 _RELEASE_ARTIFACTS: dict[Path, str] = {
-    _WEIGHTS / "model.onnx": f"{_RELEASE_BASE}/model.onnx",
-    _WEIGHTS / "model.lgb": f"{_RELEASE_BASE}/model.lgb",
+    _MODELS / "model.onnx": f"{_RELEASE_BASE}/model.onnx",
+    _MODELS / "model.lgb": f"{_RELEASE_BASE}/model.lgb",
     MEDIANS_PATH: f"{_RELEASE_BASE}/train_medians.npy",
     BIASES_PATH: f"{_RELEASE_BASE}/threshold_biases.npy",
 }
@@ -97,7 +96,7 @@ def load_classifier() -> RocketClassifier | None:
     Returns:
         A ready-to-use ``RocketClassifier``, or ``None`` if artifacts are unavailable.
     """
-    _WEIGHTS.mkdir(exist_ok=True)
+    _MODELS.mkdir(exist_ok=True)
     for path, url in _RELEASE_ARTIFACTS.items():
         _ensure_artifact(path, url)
 
@@ -418,7 +417,7 @@ def main() -> None:
         st.markdown("---")
         if clf is None:
             st.error(
-                "**Model not found.**\n\nDownload the model first:\n```\nmake download-weights\n```"
+                "**Model not found.**\n\nDownload the model first:\n```\nmake download-models\n```"
             )
         else:
             st.success("✓ Model loaded")

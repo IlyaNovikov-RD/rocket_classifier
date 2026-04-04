@@ -12,17 +12,17 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Copy production source only (no data, no research, no weights)
+# Copy production source only (no data, no research, no models)
 COPY rocket_classifier/ ./rocket_classifier/
-COPY scripts/download_weights.py ./scripts/
+COPY scripts/download_models.py ./scripts/
 
 # Install the project itself
 RUN uv sync --frozen --no-dev
 
 # Download model artifacts from GitHub Release at build time
-RUN uv run python scripts/download_weights.py
+RUN uv run python scripts/download_models.py
 
 # Pre-create runtime directories
-RUN mkdir -p cache outputs
+RUN mkdir -p cache models outputs
 
 CMD ["uv", "run", "python", "-m", "rocket_classifier.main"]

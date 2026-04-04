@@ -10,17 +10,17 @@
 #   make format     Auto-format source files with ruff
 #   make demo       Launch the Streamlit interactive demo
 #   make lock       Regenerate uv.lock from pyproject.toml
-#   make download-weights  Download model + medians + biases from GitHub Release
+#   make download-models  Download model + medians + biases from GitHub Release
 #   make download-all      Download model artifacts + feature caches from GitHub Release
 #   make run               Run inference pipeline → submission.csv
 #   make interpret         Regenerate SHAP plot + report after a new model is deployed
 #   make visualize         Regenerate demo.png (physics feature visualization)
 #   make pipeline          Full local pipeline: download-all → run → interpret
 
-.PHONY: install test lint format demo lock download-weights download-all run interpret visualize pipeline export-model
+.PHONY: install test lint format demo lock download-models download-all run interpret visualize pipeline export-model
 
 install:
-	uv sync
+	uv sync --group dev
 
 test:
 	uv run pytest tests/ -v
@@ -37,19 +37,21 @@ demo:
 lock:
 	uv lock
 
-download-weights:
-	uv run python scripts/download_weights.py
+download-models:
+	uv run python scripts/download_models.py
 
 download-all:
-	uv run python scripts/download_weights.py --with-caches
+	uv run python scripts/download_models.py --with-caches
 
 run:
 	uv run python -m rocket_classifier.main
 
 interpret:
+	uv sync --group research
 	uv run python research/interpret.py
 
 visualize:
+	uv sync --group research
 	uv run python research/visualize.py
 
 export-model:

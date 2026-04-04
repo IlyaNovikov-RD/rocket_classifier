@@ -157,11 +157,11 @@ def load_model(
     receives the correct shape, then report SHAP values only for the 32
     interpretable features (the priors are constant → near-zero SHAP).
     """
-    model_path = ROOT / "weights" / "model.lgb"
-    medians_path = ROOT / "weights" / "train_medians.npy"
+    model_path = ROOT / "models" / "model.lgb"
+    medians_path = ROOT / "models" / "train_medians.npy"
 
     if not model_path.exists():
-        msg = f"Model not found at {model_path}. Run: make download-weights"
+        msg = f"Model not found at {model_path}. Run: make download-models"
         raise FileNotFoundError(msg)
 
     # Load medians and biases via the standard helper
@@ -186,10 +186,10 @@ def load_model(
     # regardless of whether model.onnx is also present.
     import lightgbm as _lgb
 
-    lgb_path = ROOT / "weights" / "model.lgb"
+    lgb_path = ROOT / "models" / "model.lgb"
     if not lgb_path.exists():
         raise FileNotFoundError(
-            f"{lgb_path} not found. Run: make download-weights\n"
+            f"{lgb_path} not found. Run: make download-models\n"
             "(model.lgb is required alongside model.onnx for SHAP analysis)"
         )
     raw_model = _lgb.Booster(model_file=str(lgb_path))

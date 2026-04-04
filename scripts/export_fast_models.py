@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Export model artifacts to faster inference formats and benchmark all backends.
 
-Run once after downloading new weights (or use: make export-model):
+Run once after downloading new models (or use: make export-model):
     uv run python export_fast_models.py
 
-Exports to weights/:
+Exports to models/:
     model.lgb   — native LightGBM text format (no sklearn overhead)
     model.onnx  — ONNX format (fastest inference, 2.6x over sklearn)
 
@@ -26,7 +26,7 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 
-WEIGHTS_DIR = Path(__file__).parent.parent / "weights"
+WEIGHTS_DIR = Path(__file__).parent.parent / "models"
 
 
 def _load_booster() -> tuple[object | None, object]:
@@ -53,7 +53,7 @@ def _load_booster() -> tuple[object | None, object]:
         return clf, booster
 
     print(
-        "ERROR: neither model.lgb nor model.pkl found in weights/.\nRun: make download-weights",
+        "ERROR: neither model.lgb nor model.pkl found in models/.\nRun: make download-models",
         file=sys.stderr,
     )
     sys.exit(1)

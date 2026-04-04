@@ -19,18 +19,10 @@ charset-normalizer==3.4.6
     # via requests
 click==8.3.1
     # via streamlit
-cloudpickle==3.1.2
-    # via shap
 colorama==0.4.6 ; sys_platform == 'win32'
-    # via
-    #   click
-    #   tqdm
-contourpy==1.3.3
-    # via matplotlib
-cycler==0.12.1
-    # via matplotlib
-fonttools==4.62.1
-    # via matplotlib
+    # via click
+flatbuffers==25.12.19
+    # via onnxruntime
 gitdb==4.0.12
     # via gitpython
 gitpython==3.1.46
@@ -42,60 +34,53 @@ jinja2==3.1.6
     #   altair
     #   pydeck
 joblib==1.5.3
-    # via scikit-learn
+    # via
+    #   rocket-classifier
+    #   scikit-learn
 jsonschema==4.26.0
     # via altair
 jsonschema-specifications==2025.9.1
     # via jsonschema
-kiwisolver==1.5.0
-    # via matplotlib
 lightgbm==4.6.0
     # via rocket-classifier
-llvmlite==0.46.0
-    # via numba
 markupsafe==3.0.3
     # via jinja2
-matplotlib==3.10.8
-    # via rocket-classifier
+mpmath==1.3.0
+    # via sympy
 narwhals==2.18.1
     # via
     #   altair
     #   plotly
-numba==0.64.0
-    # via shap
 numpy==2.4.3
     # via
-    #   contourpy
     #   lightgbm
-    #   matplotlib
-    #   numba
+    #   onnxruntime
     #   pandas
     #   pydeck
     #   rocket-classifier
     #   scikit-learn
     #   scipy
-    #   shap
     #   streamlit
+onnxruntime==1.24.4
+    # via rocket-classifier
 packaging==26.0
     # via
     #   altair
-    #   matplotlib
+    #   onnxruntime
     #   plotly
-    #   shap
     #   streamlit
 pandas==2.3.3
     # via
     #   rocket-classifier
-    #   shap
     #   streamlit
 pillow==12.1.1
-    # via
-    #   matplotlib
-    #   streamlit
+    # via streamlit
 plotly==6.6.0
     # via rocket-classifier
 protobuf==6.33.6
-    # via streamlit
+    # via
+    #   onnxruntime
+    #   streamlit
 pyarrow==23.0.1
     # via
     #   rocket-classifier
@@ -106,12 +91,8 @@ pydantic-core==2.41.5
     # via pydantic
 pydeck==0.9.1
     # via streamlit
-pyparsing==3.3.2
-    # via matplotlib
 python-dateutil==2.9.0.post0
-    # via
-    #   matplotlib
-    #   pandas
+    # via pandas
 pytz==2026.1.post1
     # via pandas
 referencing==0.37.0
@@ -127,24 +108,19 @@ rpds-py==0.30.0
     #   jsonschema
     #   referencing
 scikit-learn==1.8.0
-    # via
-    #   rocket-classifier
-    #   shap
+    # via rocket-classifier
 scipy==1.17.1
     # via
     #   lightgbm
     #   scikit-learn
-    #   shap
-shap==0.50.0
-    # via rocket-classifier
 six==1.17.0
     # via python-dateutil
-slicer==0.0.8
-    # via shap
 smmap==5.0.3
     # via gitdb
 streamlit==1.55.0
     # via rocket-classifier
+sympy==1.14.0
+    # via onnxruntime
 tenacity==9.1.4
     # via streamlit
 threadpoolctl==3.6.0
@@ -153,15 +129,12 @@ toml==0.10.2
     # via streamlit
 tornado==6.5.5
     # via streamlit
-tqdm==4.67.3
-    # via shap
 typing-extensions==4.15.0
     # via
     #   altair
     #   pydantic
     #   pydantic-core
     #   referencing
-    #   shap
     #   streamlit
     #   typing-inspection
 typing-inspection==0.4.2
