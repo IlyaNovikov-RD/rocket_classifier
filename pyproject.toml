@@ -25,7 +25,7 @@ dev = [
 ]
 research = [
     "matplotlib>=3.7",
-    "shap>=0.44,<0.51",
+    "shap>=0.44,<0.52",
 ]
 
 [build-system]
