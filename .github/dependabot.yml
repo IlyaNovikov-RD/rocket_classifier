@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Python dependencies via uv (pyproject.toml)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      production:
+        patterns: ["*"]
+        exclude-patterns: ["pytest*", "ruff*"]
+      dev:
+        patterns: ["pytest*", "ruff*"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
