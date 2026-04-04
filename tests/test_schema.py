@@ -6,6 +6,9 @@ for both training (with label) and inference (without label) inputs.
 
 from __future__ import annotations
 
+import logging
+import math
+
 import pandas as pd
 import pytest
 from pydantic import ValidationError
@@ -96,6 +99,54 @@ class TestTrajectoryPointInvalid:
                 z=0.0,
                 unknown_field="bad",
             )
+
+    def test_float_label_truncated_to_int(self) -> None:
+        """label=0.7 is truncated to 0 via int(v) — verify this behaviour."""
+        p = TrajectoryPoint(
+            traj_ind=0,
+            time_stamp="2024-01-01",
+            x=0.0,
+            y=0.0,
+            z=0.0,
+            label=0.7,
+        )
+        assert p.label == 0
+
+    def test_float_label_out_of_range_rejected(self) -> None:
+        """label=3.5 truncates to 3 which is not in {0,1,2} → rejected."""
+        with pytest.raises(ValidationError):
+            TrajectoryPoint(
+                traj_ind=0,
+                time_stamp="2024-01-01",
+                x=0.0,
+                y=0.0,
+                z=0.0,
+                label=3.5,
+            )
+
+    def test_nan_coordinate_accepted(self) -> None:
+        """NaN coordinates pass Pydantic float validation (no explicit NaN rejection)."""
+        p = TrajectoryPoint(
+            traj_ind=0,
+            time_stamp="2024-01-01",
+            x=float("nan"),
+            y=0.0,
+            z=0.0,
+        )
+        assert math.isnan(p.x)
+
+    def test_high_altitude_emits_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Altitude > 100 km should emit a warning but not reject the point."""
+        with caplog.at_level(logging.WARNING):
+            p = TrajectoryPoint(
+                traj_ind=5,
+                time_stamp="2024-01-01",
+                x=0.0,
+                y=0.0,
+                z=150_000.0,
+            )
+        assert p.z == 150_000.0
+        assert any("implausibly high altitude" in msg for msg in caplog.messages)
 
 
 # ---------------------------------------------------------------------------

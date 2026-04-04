@@ -16,6 +16,10 @@ on:
     types: [published]
   workflow_dispatch:  # allow manual trigger from GitHub Actions UI
 
+concurrency:
+  group: release-update
+  cancel-in-progress: false
+
 jobs:
   pipeline:
     name: Inference + Interpretability

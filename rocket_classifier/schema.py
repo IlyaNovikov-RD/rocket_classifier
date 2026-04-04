@@ -150,7 +150,7 @@ def validate_dataframe(
         valid, errors = validate_dataframe(pd.read_csv("data/train.csv"), has_label=True)
         if errors:
             for idx, exc in errors:
-                print(f"Row {idx}: {exc}")
+                logger.warning("Row %d: %s", idx, exc)
     """
     required_cols = {"traj_ind", "time_stamp", "x", "y", "z"}
     if has_label:

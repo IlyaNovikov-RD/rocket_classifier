@@ -21,7 +21,7 @@ importance in the trained model, so this approximation has no measurable
 effect on predictions.
 
 Backend selection order (automatic, first available wins):
-    model.onnx  →  model.lgb  →  model.pkl
+    model_opt.onnx  →  model.onnx  →  model.lgb  →  model.pkl
 """
 
 from __future__ import annotations
@@ -253,11 +253,18 @@ class RocketClassifier:
             model = _NativeLGBMBackend(booster)
             backend_name = f"native LightGBM ({lgb_path.name})"
 
-        if model is None:
+        if model is None and pkl_path.exists():
             import joblib
 
             model = joblib.load(str(pkl_path))
             backend_name = f"joblib ({pkl_path.name})"
+
+        if model is None:
+            raise FileNotFoundError(
+                f"No model backends available. Checked: {onnx_opt_path}, "
+                f"{onnx_path}, {lgb_path}, {pkl_path}. "
+                f"Run 'make download-models' to download artifacts."
+            )
 
         medians = np.load(str(medians_path))
         if medians.shape != (len(SELECTED_FEATURES),):
