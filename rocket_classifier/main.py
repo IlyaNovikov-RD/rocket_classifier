@@ -132,26 +132,30 @@ def build_proximity_groups(
     Returns:
         Integer array of group IDs aligned with the input index.
     """
-    prox_df = pd.DataFrame({
-        "lx_r": launch_x.fillna(0.0).round(_PROX_POS_PRECISION),
-        "ly_r": launch_y.fillna(0.0).round(_PROX_POS_PRECISION),
-        "lt_s": launch_lt_s,
-    }, index=launch_x.index)
+    lx_r = launch_x.fillna(0.0).round(_PROX_POS_PRECISION).values
+    ly_r = launch_y.fillna(0.0).round(_PROX_POS_PRECISION).values
+    lt_s = launch_lt_s.values
 
-    prox_map: dict[int, int] = {}
-    next_gid = 0
-    for (_, _), pos_grp in prox_df.groupby(["lx_r", "ly_r"], sort=False):
-        pos_sorted = pos_grp.sort_values("lt_s")
-        salvo_start: float | None = None
-        for tid, row in pos_sorted.iterrows():
-            t = float(row["lt_s"])
-            if salvo_start is None or t - salvo_start > _PROX_TIME_WINDOW_S:
-                salvo_start = t
-                gid = next_gid
-                next_gid += 1
-            prox_map[tid] = gid
+    # Sort by (lx_r, ly_r, lt_s) — one global sort instead of per-group sorts.
+    order = np.lexsort((lt_s, ly_r, lx_r))
+    lx_s, ly_s, lt_sorted = lx_r[order], ly_r[order], lt_s[order]
 
-    return np.array([prox_map[t] for t in launch_x.index], dtype=np.int32)
+    # Single linear scan: new group starts when position changes or time exceeds window.
+    new_group = np.ones(len(order), dtype=bool)
+    salvo_start = lt_sorted[0]
+    for i in range(1, len(order)):
+        pos_same = lx_s[i] == lx_s[i - 1] and ly_s[i] == ly_s[i - 1]
+        if pos_same and lt_sorted[i] - salvo_start <= _PROX_TIME_WINDOW_S:
+            new_group[i] = False
+        else:
+            salvo_start = lt_sorted[i]
+
+    gid_sorted = np.cumsum(new_group, dtype=np.int32) - 1
+
+    # Map back to original positional order: gid_by_orig_pos[i] = group of position i.
+    gid_by_orig_pos = np.empty(len(order), dtype=np.int32)
+    gid_by_orig_pos[order] = gid_sorted
+    return gid_by_orig_pos
 
 
 def apply_salvo_consensus(y_pred: np.ndarray, group_ids: np.ndarray) -> np.ndarray:
@@ -164,14 +168,22 @@ def apply_salvo_consensus(y_pred: np.ndarray, group_ids: np.ndarray) -> np.ndarr
     Returns:
         Copy of ``y_pred`` with borderline predictions corrected by consensus.
     """
+    # Vectorized: count class votes per group with np.add.at, then apply
+    # strict-majority (top_count > rest) to groups of size ≥ 2.
+    _, gid_inverse, gid_counts = np.unique(group_ids, return_inverse=True, return_counts=True)
+
+    n_classes = int(y_pred.max()) + 1
+    group_class_votes = np.zeros((len(gid_counts), n_classes), dtype=np.int32)
+    np.add.at(group_class_votes, (gid_inverse, y_pred), 1)
+
+    top_class = np.argmax(group_class_votes, axis=1).astype(np.int32)
+    top_count = group_class_votes[np.arange(len(gid_counts)), top_class]
+    has_majority = top_count * 2 > gid_counts  # strict majority
+    apply_consensus = (gid_counts >= 2) & has_majority
+
     result = y_pred.copy()
-    sizes = pd.Series(group_ids).value_counts()
-    for gid in sizes[sizes >= 2].index:
-        mask = group_ids == gid
-        vals, counts = np.unique(y_pred[mask], return_counts=True)
-        top = np.argmax(counts)
-        if counts[top] > mask.sum() - counts[top]:
-            result[mask] = vals[top]
+    update_mask = apply_consensus[gid_inverse]
+    result[update_mask] = top_class[gid_inverse[update_mask]]
     return result
 
 

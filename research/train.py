@@ -587,25 +587,26 @@ log.info("Feature matrix: %s | Classes: 0=%d  1=%d  2=%d",
 log.info("Building proximity-based salvo groups...")
 launch_lt_s = feats["launch_time"].astype(np.int64) / 1e9
 
-prox_df = pd.DataFrame({
-    "lx_r": feats["launch_x"].fillna(0.0).round(PROX_POS_PRECISION),
-    "ly_r": feats["launch_y"].fillna(0.0).round(PROX_POS_PRECISION),
-    "lt_s": launch_lt_s,
-}, index=feats.index)
+lx_r = feats["launch_x"].fillna(0.0).round(PROX_POS_PRECISION).values
+ly_r = feats["launch_y"].fillna(0.0).round(PROX_POS_PRECISION).values
+lt_arr = launch_lt_s.values
 
-prox_group_map: dict[int, int] = {}
-next_pgid = 0
-for (_, _), pos_group in prox_df.groupby(["lx_r", "ly_r"], sort=False):
-    pos_sorted = pos_group.sort_values("lt_s")
-    salvo_start: float | None = None
-    for tid, row in pos_sorted.iterrows():
-        t = float(row["lt_s"])
-        if salvo_start is None or t - salvo_start > PROX_TIME_WINDOW_S:
-            salvo_start = t
-            pgid = next_pgid
-            next_pgid += 1
-        prox_group_map[tid] = pgid
-prox_group_ids = np.array([prox_group_map[tid] for tid in feats.index], dtype=np.int32)
+# One global sort + single linear scan — matches main.py build_proximity_groups logic exactly.
+order = np.lexsort((lt_arr, ly_r, lx_r))
+lx_s, ly_s, lt_s_arr = lx_r[order], ly_r[order], lt_arr[order]
+
+new_group = np.ones(len(order), dtype=bool)
+salvo_start = lt_s_arr[0]
+for i in range(1, len(order)):
+    pos_same = lx_s[i] == lx_s[i - 1] and ly_s[i] == ly_s[i - 1]
+    if pos_same and lt_s_arr[i] - salvo_start <= PROX_TIME_WINDOW_S:
+        new_group[i] = False
+    else:
+        salvo_start = lt_s_arr[i]
+
+gid_sorted = np.cumsum(new_group, dtype=np.int32) - 1
+prox_group_ids = np.empty(len(order), dtype=np.int32)
+prox_group_ids[order] = gid_sorted
 
 prox_sizes = pd.Series(prox_group_ids).value_counts()
 n_salvos = (prox_sizes >= 2).sum()
@@ -624,14 +625,16 @@ if multi_prox.sum() > 0:
 
 def apply_consensus(preds: np.ndarray) -> np.ndarray:
     """Mode-vote within proximity groups of size ≥ 2 (strict majority only)."""
+    _, gid_inverse, gid_counts = np.unique(prox_group_ids, return_inverse=True, return_counts=True)
+    n_classes = int(preds.max()) + 1
+    group_class_votes = np.zeros((len(gid_counts), n_classes), dtype=np.int32)
+    np.add.at(group_class_votes, (gid_inverse, preds), 1)
+    top_class = np.argmax(group_class_votes, axis=1).astype(np.int32)
+    top_count = group_class_votes[np.arange(len(gid_counts)), top_class]
+    apply_mask = (gid_counts >= 2) & (top_count * 2 > gid_counts)
     result = preds.copy()
-    for gid in prox_sizes[prox_sizes >= 2].index:
-        mask = prox_group_ids == gid
-        group_preds = preds[mask]
-        values, counts = np.unique(group_preds, return_counts=True)
-        top_idx = np.argmax(counts)
-        if counts[top_idx] > mask.sum() - counts[top_idx]:
-            result[mask] = values[top_idx]
+    update_mask = apply_mask[gid_inverse]
+    result[update_mask] = top_class[gid_inverse[update_mask]]
     return result
 
 

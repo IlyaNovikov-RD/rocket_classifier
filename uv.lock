@@ -734,7 +734,7 @@ dev = [
 ]
 research = [
     { name = "matplotlib", specifier = ">=3.7" },
-    { name = "shap", specifier = ">=0.44,<0.51" },
+    { name = "shap", specifier = ">=0.44,<0.52" },
 ]
 
 [[package]]

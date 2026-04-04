@@ -90,6 +90,24 @@ def export_onnx(booster: object) -> Path | None:
     onnx.save(onnx_model, str(out))
     size_mb = out.stat().st_size / 1_048_576
     print(f"  Saved model.onnx ({size_mb:.1f} MB)")
+
+    # Save a pre-optimized version so production loads skip graph optimization (~0.3s faster).
+    try:
+        import onnxruntime as ort
+
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        so.enable_mem_pattern = True
+        so.enable_cpu_mem_arena = True
+        opt_out = WEIGHTS_DIR / "model_opt.onnx"
+        so.optimized_model_filepath = str(opt_out)
+        ort.InferenceSession(str(out), sess_options=so, providers=["CPUExecutionProvider"])
+        size_mb_opt = opt_out.stat().st_size / 1_048_576
+        print(f"  Saved model_opt.onnx ({size_mb_opt:.1f} MB, pre-optimized — ~0.3s faster load)")
+    except Exception as e:
+        print(f"  model_opt.onnx skipped ({e})")
+
     return out
 
 

@@ -3,10 +3,10 @@ name: Post-Release Pipeline
 # Triggers automatically when a new GitHub Release is published.
 # Automates everything that can be automated after a model is deployed:
 #   1. Download model artifacts + feature caches from the release
-#   2. Export model.lgb → model.onnx (fastest inference backend)
+#   2. Re-export model.lgb → model.onnx + model_opt.onnx (verifies release artifacts)
 #   3. Run inference pipeline → submission.csv
 #   4. Run interpretability analysis → SHAP plot + report
-#   5. Upload submission.csv, model.onnx, and SHAP assets to the release
+#   5. Upload submission.csv, model.onnx, model_opt.onnx, and SHAP assets to the release
 #
 # All generated artifacts are uploaded to the release — no direct push to main.
 # The only step that requires a human: publishing the GitHub Release.
@@ -48,12 +48,12 @@ jobs:
           mkdir -p data
           gh release download --pattern "sample_submission.csv" --pattern "test.csv" --dir data
 
-      - name: Export model.lgb → model.onnx
+      - name: Export model.lgb → model.onnx + model_opt.onnx
         run: |
           uv pip install -q onnxmltools skl2onnx
           uv run python scripts/export_fast_models.py
 
-      - name: Upload model.onnx to release
+      - name: Upload model.onnx and model_opt.onnx to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -63,6 +63,8 @@ jobs:
           fi
           gh release delete-asset "$TAG" model.onnx --yes 2>/dev/null || true
           gh release upload "$TAG" models/model.onnx
+          gh release delete-asset "$TAG" model_opt.onnx --yes 2>/dev/null || true
+          gh release upload "$TAG" models/model_opt.onnx
 
       - name: Run inference pipeline
         run: uv run python -m rocket_classifier.main
