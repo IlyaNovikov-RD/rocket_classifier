@@ -92,14 +92,14 @@ release:
 	  --notes "$(NOTES)"
 	@echo "Release $(TAG) created. Post-release pipeline will run automatically."
 	@echo "Creating PR to commit training_report.json provenance..."
-	git checkout -b chore/training-report-$(TAG)
+	git checkout -B chore/training-report-$(TAG)
 	git add training_report.json
-	git diff --cached --quiet || git commit -m "chore: update training_report.json for $(TAG)"
-	git push -u origin chore/training-report-$(TAG)
-	gh pr create \
-	  --title "chore: update training_report.json for $(TAG)" \
-	  --base main \
-	  --body "Training provenance for $(TAG): OOB scores, hyperparameters, and consensus parameters." \
-	  --label "automated" 2>/dev/null || true
+	git diff --cached --quiet && echo "training_report.json unchanged, skipping PR" || \
+	  (git commit -m "chore: update training_report.json for $(TAG)" && \
+	   git push -u origin chore/training-report-$(TAG) && \
+	   gh pr create \
+	     --title "chore: update training_report.json for $(TAG)" \
+	     --base main \
+	     --body "Training provenance for $(TAG): OOB scores, hyperparameters, and consensus parameters.")
 	git checkout main
 	@echo "Done. Merge the PR to record provenance in main."
