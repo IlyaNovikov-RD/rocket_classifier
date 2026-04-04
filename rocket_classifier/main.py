@@ -282,8 +282,8 @@ def main() -> None:
     # Get launch timestamps for proximity grouping.
     # Preferred source: launch_time column in the feature cache (build_features
     # stores it so the raw CSV is not needed at inference time).
-    # Fallback: re-derive from test_raw when the cache was built by an older
-    # version of features.py that did not include launch_time.
+    # Fallback: re-derive from test_raw or test.csv for caches built before
+    # launch_time was added to features.py.
     if "launch_time" in test_feats.columns:
         _launch_lt_s = test_feats["launch_time"].astype(np.int64) / 1e9
     else:
