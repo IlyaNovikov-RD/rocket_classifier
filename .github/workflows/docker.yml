@@ -1,0 +1,31 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build & Smoke Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t rocket-classifier .
+
+      - name: Smoke test — container starts and prints help
+        run: |
+          docker run --rm rocket-classifier \
+            uv run python -c "
+          from rocket_classifier.model import RocketClassifier, SELECTED_FEATURES, PRODUCTION_BIASES
+          assert len(SELECTED_FEATURES) == 32
+          assert PRODUCTION_BIASES.shape == (3,)
+          print('Model package imports OK')
+          print(f'  SELECTED_FEATURES: {len(SELECTED_FEATURES)} features')
+          print(f'  PRODUCTION_BIASES: {PRODUCTION_BIASES.tolist()}')
+          "
