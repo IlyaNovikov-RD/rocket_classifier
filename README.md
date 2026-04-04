@@ -528,7 +528,7 @@ All OOB misses were class-0 rockets mispredicted as class-1. Diagnostic analysis
 
 ## Model Interpretability
 
-![SHAP Feature Importance](assets/shap_summary.png)
+![SHAP Feature Importance](https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download/shap_summary.png)
 
 `research/interpret.py` computes exact SHAP values via `TreeExplainer`. Top discriminators:
 
