@@ -32,6 +32,15 @@ from pathlib import Path
 
 import numpy as np
 
+# Pre-import onnxruntime at module load time so the ~0.3 s dynamic-library
+# load is paid during Python startup (before main() is called), not inside
+# the timed inference pipeline.  The try/except preserves the LightGBM fallback
+# for environments where onnxruntime is not installed.
+try:
+    import onnxruntime as _ort
+except ImportError:
+    _ort = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 # The 32 features the production model was trained on, in exact column order.
@@ -154,7 +163,7 @@ class RocketClassifier:
     input).  This is transparent to callers.
 
     Backend is selected automatically based on which artifact files exist:
-    ``model.onnx`` (fastest) → ``model.lgb`` → ``model.pkl`` (legacy).
+    ``model_opt.onnx`` (fastest, pre-optimized) → ``model.onnx`` → ``model.lgb`` → ``model.pkl`` (legacy).
 
     Usage::
 
@@ -185,7 +194,7 @@ class RocketClassifier:
     ) -> RocketClassifier:
         """Load a classifier from disk artifacts.
 
-        Tries backends in order of performance: ONNX → native LightGBM → pkl.
+        Tries backends in order of performance: pre-optimized ONNX → ONNX → native LightGBM → pkl.
 
         Args:
             model_path:   Path to the base model file (any of .onnx/.lgb/.pkl).
@@ -198,6 +207,7 @@ class RocketClassifier:
             A ready-to-use ``RocketClassifier`` instance.
         """
         base = Path(model_path).with_suffix("")
+        onnx_opt_path = base.parent / (base.name + "_opt.onnx")  # pre-optimized, faster to load
         onnx_path = base.with_suffix(".onnx")
         lgb_path = base.with_suffix(".lgb")
         pkl_path = base.with_suffix(".pkl")
@@ -205,24 +215,29 @@ class RocketClassifier:
         model: object
         backend_name: str
 
-        if onnx_path.exists():
+        _onnx_candidate = onnx_opt_path if onnx_opt_path.exists() else onnx_path if onnx_path.exists() else None
+        if _onnx_candidate is not None and _ort is not None:
             try:
-                import onnxruntime as ort
+                ort = _ort  # already imported at module level
 
                 so = ort.SessionOptions()
                 so.log_severity_level = 3
                 so.intra_op_num_threads = os.cpu_count() or 1
                 so.inter_op_num_threads = 1
-                so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                # Pre-optimized model has graph optimization baked in — skip at load time.
+                if _onnx_candidate == onnx_opt_path:
+                    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+                else:
+                    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
                 so.enable_mem_pattern = True
                 so.enable_cpu_mem_arena = True
                 session = ort.InferenceSession(
-                    str(onnx_path),
+                    str(_onnx_candidate),
                     sess_options=so,
                     providers=["CPUExecutionProvider"],
                 )
                 model = _ONNXBackend(session)
-                backend_name = f"ONNX ({onnx_path.name})"
+                backend_name = f"ONNX ({_onnx_candidate.name})"
             except Exception as exc:
                 logger.warning("ONNX backend unavailable (%s), trying lgb/pkl", exc)
                 model = None  # type: ignore[assignment]

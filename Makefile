@@ -18,9 +18,9 @@
 #   make pipeline          Full local pipeline: download-all → run → interpret
 #
 # After training a new model (research/train.py):
-#   make release TAG=v1.x.0 NOTES="Description of changes"
-#   This creates a GitHub Release with all required artifacts and triggers
-#   the post-release pipeline (ONNX export, inference, SHAP, submission.csv).
+#   make export-model                         # build model.onnx + model_opt.onnx
+#   make release TAG=v1.x.0 NOTES="..."      # upload all artifacts + trigger CI
+#   ONNX files are included in the release from the start (no download gap).
 
 .PHONY: install test lint format demo lock download-models download-all run interpret visualize pipeline export-model release
 
@@ -75,12 +75,16 @@ release:
 	@test -f models/model.lgb           || (echo "models/model.lgb not found — run research/train.py first"; exit 1)
 	@test -f models/train_medians.npy   || (echo "models/train_medians.npy not found"; exit 1)
 	@test -f models/threshold_biases.npy || (echo "models/threshold_biases.npy not found"; exit 1)
+	@test -f models/model_opt.onnx      || (echo "models/model_opt.onnx not found — run: make export-model"; exit 1)
+	@test -f models/model.onnx          || (echo "models/model.onnx not found — run: make export-model"; exit 1)
 	@test -f cache/cache_train_features.parquet || (echo "cache/cache_train_features.parquet not found"; exit 1)
 	@test -f cache/cache_test_features.parquet  || (echo "cache/cache_test_features.parquet not found"; exit 1)
 	@test -f data/test.csv              || (echo "data/test.csv not found"; exit 1)
 	@test -f data/sample_submission.csv || (echo "data/sample_submission.csv not found"; exit 1)
 	gh release create $(TAG) \
 	  models/model.lgb \
+	  models/model.onnx \
+	  models/model_opt.onnx \
 	  models/train_medians.npy \
 	  models/threshold_biases.npy \
 	  training_report.json \

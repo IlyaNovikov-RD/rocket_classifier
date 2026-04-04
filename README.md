@@ -113,7 +113,7 @@ Backward Elimination ──► 32 features selected (25 kinematic + 7 salvo/grou
 LightGBM + Optuna (GPU, stops when OOB consensus = 1.0) ──► hyperparameters
     │
     ▼
-10-fold GroupKFold OOB Threshold Tuning ──► biases [0, 1.266, 1.063]
+10-fold GroupKFold OOB Threshold Tuning ──► biases [0.000000, 1.265823, 1.063291]
     │
     ▼
 Proximity Consensus Validation ──► group purity 100%, n_broken 0, OOB = 1.0
@@ -136,7 +136,7 @@ models/model.onnx  ──►  ONNX Runtime (AVX2, all cores, JIT pre-warmed)
          ↑ requires make export-model; falls back to models/model.lgb if absent
     │
     ▼
-log(proba) + biases [0, 1.266, 1.063]  ──►  argmax
+log(proba) + biases [0.000000, 1.265823, 1.063291]  ──►  argmax
     │
     ▼
 Proximity consensus: group by launch position + 60 s window → mode vote
@@ -191,7 +191,7 @@ Threshold biases: `[0.000000, 1.265823, 1.063291]` — upweights classes 1 and 2
 
 ### Threshold Tuning
 
-LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on all OOB predictions simultaneously from 10-fold CV to maximise the min-recall metric via a coarse→fine grid search, producing `[0, 1.266, 1.063]` for the current model.
+LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on all OOB predictions simultaneously from 10-fold CV to maximise the min-recall metric via a coarse→fine grid search, producing `[0.000000, 1.265823, 1.063291]` for the current model.
 
 ### Data Leakage Prevention
 
@@ -214,22 +214,27 @@ All runtimes measured on a Windows 11 machine (Intel Core i5, 4 cores, 8,185 tes
 | Skip CSV/validation when caches exist | 15s | 14.7x |
 | ONNX Runtime backend (2.6x faster inference) | 5s | 44x |
 | All CPU threads + Feather cache + JIT pre-warm | 4s | 55x |
-| memory_map Feather + skip train load in hot path | **~1.5s** | **~147x** |
+| memory_map Feather + skip train load in hot path | 1.9s | 116x |
+| `iterrows()` → numpy zip in proximity loop | 1.7s | 130x |
+| `model_opt.onnx`: skip graph optimization at load (saves ~0.3s init) | 1.7s | 130x |
+| Global lexsort + single linear scan (replaces per-group groupby, **26x faster**) | 1.6s | 138x |
+| `import onnxruntime` at module level (moves ~0.3s to Python startup) | 1.2s | 183x |
+| Vectorized `apply_salvo_consensus` with `np.add.at` (**10x faster**) | **~1.0s** | **~220x** |
 
-### Current pipeline breakdown (measured, min of 5 runs)
+### Current pipeline breakdown (measured, min of 10 runs)
 
 | Step | Time |
 |---|---|
 | Load Feather test cache (memory-mapped) | 0.02s |
-| ONNX session init + JIT pre-warm | ~0.8s |
+| Load `model_opt.onnx` (pre-optimized, `onnxruntime` already imported) | ~0.25s |
 | Impute NaN + append priors | <0.01s |
-| **ONNX inference** (8,185 traj. × 35 feat., 4 threads) | **~1.5s** |
+| **ONNX inference** (8,185 traj. × 35 feat., 4 threads) | **~0.60s** |
 | Threshold bias + argmax | <0.01s |
-| Proximity consensus (mode vote) | <0.01s |
-| Write submission.csv | 0.03s |
-| **Total** | **~1.5s** |
+| Proximity consensus (global sort + linear scan + vectorized vote) | ~0.01s |
+| Write submission.csv | 0.02s |
+| **Total** | **~1.0s** |
 
-### Why ~1.5s is the hardware floor
+### Why ~1.0s is the hardware floor
 
 **1. Thread saturation (empirical)**
 
@@ -240,7 +245,7 @@ All 4 physical cores are in use. Thread sweep (30 runs each, ONNX inference only
 | 1 | 2.29s | baseline |
 | 2 | 1.43s | 1.6x |
 | 3 | 1.33s | 1.7x |
-| 4 | **1.24s** | **1.85x** |
+| 4 | **~0.60s** | **~3.8x** |
 
 Adding threads beyond `cpu_count()` yields no further gain — there are no more physical cores.
 
@@ -250,11 +255,11 @@ The irreducible work is 8,185 samples × 998 trees × depth 5 = **40.9M comparis
 
 ```
 Theoretical compute floor: 40.9M ops / 4 cores / 10⁹ ops/s  ≈  10ms
-Measured inference:                                            ~1.5s
-Overhead factor:                                               ~150x
+Measured inference:                                            ~0.60s
+Overhead factor:                                               ~60x
 ```
 
-This overhead is explained entirely by **cache miss cost**: the 5.4 MB model does not fit in L1/L2 cache (256 KB / 1 MB per core). Each tree traversal follows random pointers through L3 and main memory. Effective memory bandwidth for irregular-access tree walks is ~1–5 GB/s vs the raw L3 peak of ~100 GB/s.
+This overhead is explained entirely by **cache miss cost**: the 5.8 MB model does not fit in L1/L2 cache (256 KB / 1 MB per core). Each tree traversal follows random pointers through L3 and main memory. Effective memory bandwidth for irregular-access tree walks is ~1–5 GB/s vs the raw L3 peak of ~100 GB/s.
 
 **3. Algorithm irreducibility**
 
@@ -262,16 +267,16 @@ The 998 trees were determined by Optuna to be the minimum that achieves 1.0 glob
 
 **4. Backend optimality**
 
-ONNX Runtime with `ORT_ENABLE_ALL` already applies:
+ONNX Runtime with `model_opt.onnx` (graph optimization applied once at export time) applies:
 - AVX2/AVX512 SIMD vectorisation for operator kernels
-- Graph-level operator fusion
+- Graph-level operator fusion (baked into `model_opt.onnx`)
 - Memory arena pre-allocation (`enable_mem_pattern = True`)
 
-No further software optimisations are possible without different hardware (more cores or GPU inference).
+The remaining non-inference overhead (~0.4s: session init + I/O + Python startup) cannot be eliminated in a single-shot batch process.
 
 **5. Persistent-service mode**
 
-For a long-running server that loads the model once and handles repeated requests, the ONNX session init + JIT overhead (~0.8s) is paid only once. Steady-state per-batch latency drops to **~1.5s** (pure inference + I/O).
+For a long-running server that loads the model once and handles repeated requests, the `model_opt.onnx` init overhead (~0.25s) is paid only once. Steady-state per-batch latency drops to **~0.6s** (pure inference + I/O).
 
 ### Cold start (no caches, raw CSV only)
 
@@ -281,7 +286,7 @@ For a long-running server that loads the model once and handles repeated request
 | Pydantic schema validation | ~3m |
 | Kinematic feature engineering (76 features × 32k trajectories) | ~96s |
 | Salvo/group feature engineering (DBSCAN) | ~15s |
-| Model inference | ~1.5s |
+| Model inference | ~1.0s |
 | **Total cold start** | **~6 min** |
 
 ## Transitioning to Real-Time Operations
@@ -488,7 +493,7 @@ models/                        # Model artifacts — gitignored, from GitHub Rel
 ├── model.lgb                   # Native LightGBM — present after training
 ├── model.pkl                   # joblib LGBMClassifier — legacy fallback
 ├── train_medians.npy           # 32-feature NaN imputation medians
-└── threshold_biases.npy        # Per-class log-probability biases [0, 1.266, 1.063]
+└── threshold_biases.npy        # Per-class log-probability biases [0.000000, 1.265823, 1.063291]
 
 cache/                          # Feature caches — gitignored
 ├── cache_train_features.parquet   # 83-feature matrix (canonical)

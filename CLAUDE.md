@@ -16,8 +16,9 @@ make pipeline         # download-all + run + interpret (full end-to-end)
 make demo             # launch Streamlit app (localhost:8501)
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
-make export-model     # convert model.lgb → model.onnx (requires onnxmltools skl2onnx)
-make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts
+make export-model     # convert model.lgb → model.onnx + model_opt.onnx (requires onnxmltools skl2onnx)
+make export-model     # must run before release — builds model.onnx + model_opt.onnx
+make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts (ONNX required)
 ```
 
 Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_perfect_predictions -v`
@@ -27,7 +28,7 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 **Production package** (`rocket_classifier/`): Inference-only. No training code.
 
 - `features.py` — Extracts 83 features per trajectory: 76 physics features from raw `(x, y, z, time_stamp)` radar pings via finite-difference kinematics, plus 7 salvo/rebel-group features from DBSCAN clustering (domain assumptions 3a-3c). Single source of truth for feature engineering.
-- `model.py` — `RocketClassifier` class wraps a pre-trained LightGBM model. Contains `SELECTED_FEATURES` (32 features used in production: 25 kinematic + 7 salvo/group), `PRODUCTION_BIASES` (threshold-tuned log-probability biases), and `_GLOBAL_CLASS_PRIOR` (appended rebel-group prior columns). These are the single source of truth — never duplicate them.
+- `model.py` — `RocketClassifier` class. Backend selected automatically: `model_opt.onnx` (pre-optimized ONNX, fastest) → `model.onnx` → `model.lgb` → `model.pkl`. Contains `SELECTED_FEATURES` (32 features used in production: 25 kinematic + 7 salvo/group), `PRODUCTION_BIASES` (threshold-tuned log-probability biases), and `_GLOBAL_CLASS_PRIOR` (appended rebel-group prior columns). These are the single source of truth — never duplicate them.
 - `schema.py` — Pydantic v2 validation for raw radar data (`TrajectoryPoint`, `validate_dataframe`).
 - `main.py` — Orchestrates: load data → validate → featurize → predict → proximity consensus → write `outputs/submission.csv`.
 - `app.py` — Streamlit demo. Downloads model from GitHub Release if not local. Uses `_extract_trajectory_features` from `features.py` directly (salvo features unavailable for single-trajectory demo — imputed from medians).
@@ -44,10 +45,10 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 - **Metric**: `min_class_recall` — worst-class recall. Every design choice optimises for this, not accuracy.
 - **32 features, not 83**: Backward elimination dropped noise kinematic features; 7 salvo/group features were added via domain assumptions. The 32 in `SELECTED_FEATURES` are what the model was trained on.
 - **Model input = 35**: The model was trained with 32 base features + 3 rebel-group class-prior columns appended per fold. At production inference `_GLOBAL_CLASS_PRIOR` (the training class distribution) substitutes for those 3 columns — they have near-zero feature importance.
-- **Threshold biases** `[0, 1.266, 1.063]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `models/threshold_biases.npy` and `training_report.json`.
+- **Threshold biases** `[0.000000, 1.265823, 1.063291]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `models/threshold_biases.npy` and `training_report.json`.
 - **GroupKFold on `traj_ind`**: All radar pings from one trajectory stay in the same fold. Prevents data leakage.
 - **No training in production**: Model was trained via `research/train.py`. `rocket_classifier/` only does inference.
-- **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools skl2onnx`) to rebuild `models/model.onnx` and benchmark all backends.
+- **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools skl2onnx`) to rebuild `models/model.onnx` and `models/model_opt.onnx` (pre-graph-optimized, ~0.3s faster to load) and benchmark all backends.
 
 ## Linting
 
@@ -56,7 +57,7 @@ Ruff with `line-length = 100`, target `py312`. Intentionally suppressed: `N803`/
 ## CI
 
 GitHub Actions on push/PR to main: ruff check + pytest + Docker build.
-Post-release workflow (`update-interpretability.yml`) triggers on every GitHub Release: exports `model.onnx`, runs inference, generates SHAP assets, and uploads `submission.csv` + all artifacts to the release.
+Post-release workflow (`update-interpretability.yml`) triggers on every GitHub Release: exports `model.onnx` + `model_opt.onnx`, runs inference, generates SHAP assets, and uploads `submission.csv` + all artifacts to the release.
 Use `make release TAG=v1.x.0 NOTES="..."` to create a release with all required artifacts validated.
 
 ## Workflow Rules
