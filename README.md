@@ -229,7 +229,7 @@ All runtimes measured on a Windows 11 machine (Intel Core i5, 4 cores, 8,185 tes
 | Write submission.csv | 0.03s |
 | **Total** | **~1.5s** |
 
-### Proof this is the hardware floor
+### Why ~1.5s is the hardware floor
 
 **1. Thread saturation (empirical)**
 
