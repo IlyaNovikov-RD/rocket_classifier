@@ -279,18 +279,25 @@ def main() -> None:
     # Group by launch position + 60 s window, apply mode vote (strict majority).
     # Parameters match research/train.py exactly.
 
-    # Load timestamps for grouping. test_raw may be None on the fast path.
-    _ts_src = test_raw if test_raw is not None else pd.read_csv(
-        DATA_DIR / "test.csv", usecols=["traj_ind", "time_stamp"]
-    )
-    _ts_src = _ts_src.copy()
-    _ts_src["time_stamp"] = pd.to_datetime(_ts_src["time_stamp"], format="mixed")
-    _launch_lt_s = (
-        _ts_src.groupby("traj_ind")["time_stamp"]
-        .min()
-        .reindex(test_feats.index)
-        .astype(np.int64) / 1e9
-    )
+    # Get launch timestamps for proximity grouping.
+    # Preferred source: launch_time column in the feature cache (build_features
+    # stores it so the raw CSV is not needed at inference time).
+    # Fallback: re-derive from test_raw when the cache was built by an older
+    # version of features.py that did not include launch_time.
+    if "launch_time" in test_feats.columns:
+        _launch_lt_s = test_feats["launch_time"].astype(np.int64) / 1e9
+    else:
+        _ts_src = test_raw if test_raw is not None else pd.read_csv(
+            DATA_DIR / "test.csv", usecols=["traj_ind", "time_stamp"]
+        )
+        _ts_src = _ts_src.copy()
+        _ts_src["time_stamp"] = pd.to_datetime(_ts_src["time_stamp"], format="mixed")
+        _launch_lt_s = (
+            _ts_src.groupby("traj_ind")["time_stamp"]
+            .min()
+            .reindex(test_feats.index)
+            .astype(np.int64) / 1e9
+        )
 
     _group_ids = build_proximity_groups(
         test_feats["launch_x"], test_feats["launch_y"], _launch_lt_s
