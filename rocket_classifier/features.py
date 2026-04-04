@@ -472,5 +472,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Append salvo + rebel-group features (domain assumptions 3a-3c)
     result = _add_salvo_group_features(result, launch_times)
 
+    # Store launch_time so callers don't need the raw CSV for proximity consensus.
+    result["launch_time"] = launch_times.reindex(result.index)
+
     logger.info("Feature matrix built: shape=%s", result.shape)
     return result
