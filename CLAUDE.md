@@ -9,7 +9,7 @@ make install          # uv sync — install all dependencies
 make test             # uv run pytest tests/ -v
 make lint             # uv run ruff check .
 make format           # uv run ruff format .
-make download-weights # fetch model artifacts from latest GitHub Release into weights/
+make download-models # fetch model artifacts from latest GitHub Release into models/
 make download-all     # + feature caches into cache/
 make run              # inference pipeline → outputs/submission.csv
 make pipeline         # download-all + run + interpret (full end-to-end)
@@ -30,11 +30,10 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 - `main.py` — Orchestrates: load data → validate → featurize → predict → write `outputs/submission.csv`.
 - `app.py` — Streamlit demo. Downloads model from GitHub Release if not local. Uses `_extract_trajectory_features` from `features.py` directly (salvo features unavailable for single-trajectory demo — imputed from medians).
 
-**Research scripts** (`research/`): Colab GPU experiments. These import `torch`, `optuna`, `xgboost` and other libraries not in production deps — that's intentional. Never move these into `rocket_classifier/`.
-- `colab_train.py` — full training pipeline: feature engineering → Optuna → artifacts → 0.999911 OOB
-- `colab_analysis.py` — oracle + calibration proof that 0.999911 is the practical ceiling
+**Research scripts** (`research/`): Training and analysis scripts. These import `optuna`, `lightgbm` and other libraries not in production deps — that's intentional. Never move these into `rocket_classifier/`.
+- `train.py` — full training pipeline: feature engineering → Optuna → proximity consensus → artifacts → 1.000000 OOB
 
-**Model artifacts** (`weights/`): Gitignored. Downloaded from the latest GitHub Release via `download_weights.py`. Uses `releases/latest/download` URLs — never hardcode version numbers.
+**Model artifacts** (`models/`): Gitignored. Downloaded from the latest GitHub Release via `download_models.py`. Uses `releases/latest/download` URLs — never hardcode version numbers.
 
 **Feature caches** (`cache/`): Gitignored parquet files. Regenerated from `data/` or downloaded from release.
 
@@ -43,10 +42,10 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 - **Metric**: `min_class_recall` — worst-class recall. Every design choice optimises for this, not accuracy.
 - **32 features, not 83**: Backward elimination dropped noise kinematic features; 7 salvo/group features were added via domain assumptions. The 32 in `SELECTED_FEATURES` are what the model was trained on.
 - **Model input = 35**: The model was trained with 32 base features + 3 rebel-group class-prior columns appended per fold. At production inference `_GLOBAL_CLASS_PRIOR` (the training class distribution) substitutes for those 3 columns — they have near-zero feature importance.
-- **Threshold biases** `[0, 0.759, 0.658]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%).
+- **Threshold biases** `[0, 1.266, 1.063]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `models/threshold_biases.npy` and `training_report.json`.
 - **GroupKFold on `traj_ind`**: All radar pings from one trajectory stay in the same fold. Prevents data leakage.
-- **No training in production**: Model was trained once on Colab H100. `rocket_classifier/` only does inference.
-- **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools skl2onnx`) to rebuild `weights/model.onnx` and benchmark all backends.
+- **No training in production**: Model was trained via `research/train.py`. `rocket_classifier/` only does inference.
+- **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools skl2onnx`) to rebuild `models/model.onnx` and benchmark all backends.
 
 ## Linting
 

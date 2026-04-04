@@ -21,6 +21,7 @@ from rocket_classifier.features import (
     _safe_stats,
     build_features,
 )
+from rocket_classifier.model import SELECTED_FEATURES
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -620,6 +621,19 @@ class TestBuildFeatures:
         assert result.loc[1, "label"] == 0
         assert result.loc[2, "label"] == 2
 
+    def test_label_column_dtype_is_integer(self):
+        """label column must be integer dtype, not float or object.
+
+        pandas can silently infer float64 when mixing ints with NaN; if that
+        happens, downstream comparisons like (y == 0) still work but strict
+        dtype checks (e.g., np.int32 arrays) break without error.
+        """
+        df = self._make_raw_df(include_label=True)
+        result = build_features(df)
+        assert np.issubdtype(result["label"].dtype, np.integer), (
+            f"label dtype should be integer, got {result['label'].dtype}"
+        )
+
     def test_label_column_absent_when_not_provided(self):
         df = self._make_raw_df(include_label=False)
         result = build_features(df)
@@ -644,6 +658,21 @@ class TestBuildFeatures:
             result_fwd.sort_index(),
             result_rev.sort_index(),
             check_like=True,
+        )
+
+    def test_selected_features_contract(self):
+        """All 32 SELECTED_FEATURES in model.py must be present in build_features output.
+
+        This is the critical contract between features.py and model.py.
+        Adding or removing a feature from either file without updating the other
+        would cause silent inference failures — this test catches that.
+        """
+        df = self._make_raw_df(include_label=False)
+        result = build_features(df)
+        missing = [f for f in SELECTED_FEATURES if f not in result.columns]
+        assert not missing, (
+            f"build_features() is missing features required by model.py: {missing}\n"
+            "Update features.py or SELECTED_FEATURES in model.py to stay in sync."
         )
 
     def test_mixed_timestamp_formats(self):

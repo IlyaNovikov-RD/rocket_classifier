@@ -3,10 +3,11 @@ name: Post-Release Pipeline
 # Triggers automatically when a new GitHub Release is published.
 # Automates everything that can be automated after a model is deployed:
 #   1. Download model artifacts + feature caches from the release
-#   2. Run inference pipeline → submission.csv
-#   3. Run interpretability analysis → SHAP plot + report
-#   4. Upload submission.csv to the release assets
-#   5. Commit updated assets/ back to main
+#   2. Export model.lgb → model.onnx (fastest inference backend)
+#   3. Run inference pipeline → submission.csv
+#   4. Run interpretability analysis → SHAP plot + report
+#   5. Upload submission.csv + model.onnx to the release assets
+#   6. Commit updated assets/ back to main
 #
 # The only step that requires a human: publishing the GitHub Release.
 
@@ -35,10 +36,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --group research
 
       - name: Download model artifacts + feature caches
-        run: uv run python scripts/download_weights.py --with-caches
+        run: uv run python scripts/download_models.py --with-caches
 
       - name: Download sample_submission.csv
         env:
@@ -46,6 +47,22 @@ jobs:
         run: |
           mkdir -p data
           gh release download --pattern "sample_submission.csv" --dir data
+
+      - name: Export model.lgb → model.onnx
+        run: |
+          uv pip install -q onnxmltools skl2onnx
+          uv run python scripts/export_fast_models.py
+
+      - name: Upload model.onnx to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          gh release delete-asset "$TAG" model.onnx --yes 2>/dev/null || true
+          gh release upload "$TAG" models/model.onnx
 
       - name: Run inference pipeline
         run: uv run python -m rocket_classifier.main

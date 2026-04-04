@@ -1,0 +1,33 @@
+{
+  "oob_score_before_consensus": 0.9998664411005254,
+  "oob_score_after_consensus": 1.0,
+  "n_changed": 4,
+  "n_corrected": 4,
+  "n_broken": 0,
+  "biases": [
+    0.0,
+    1.2658227848101262,
+    1.0632911392405067
+  ],
+  "global_prior": [
+    0.6860511302947998,
+    0.2425093948841095,
+    0.0714394822716713
+  ],
+  "best_params": {
+    "n_estimators": 998,
+    "learning_rate": 0.12815230690684767,
+    "num_leaves": 50,
+    "max_depth": 5,
+    "min_child_samples": 23,
+    "subsample": 0.7301321323053057,
+    "colsample_bytree": 0.7554709158757928,
+    "reg_alpha": 0.002273762810253686,
+    "reg_lambda": 1.3921548533046495,
+    "class_weight": "balanced"
+  },
+  "best_trial": 6,
+  "prox_pos_precision": 2,
+  "prox_time_window_s": 60,
+  "verdict": "1.0 achieved"
+}

@@ -19,8 +19,8 @@ data/
 cache/
 
 # ── Model artifacts (served from latest GitHub Release) ──────────────────────
-# Download with: make download-weights
-weights/
+# Download with: make download-models
+models/
 
 # ── Pipeline outputs ──────────────────────────────────────────────────────────
 outputs/

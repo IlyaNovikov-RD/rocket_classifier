@@ -3,15 +3,15 @@
 Loads a pre-trained LightGBM model and applies threshold-tuned predictions
 optimised for the min-recall metric.
 
-No training logic lives here — all training was performed on Colab H100 via
-``research/colab_train.py`` and validated by ``research/colab_analysis.py``.
+No training logic lives here — all training is performed via
+``research/train.py`` (LightGBM + Optuna + proximity consensus → 1.0 OOB).
 
-Production artifacts (served from the latest GitHub Release — run ``make download-weights``):
+Production artifacts (served from the latest GitHub Release — run ``make download-models``):
     - model.onnx          — ONNX format (fastest inference, preferred)
     - model.lgb           — native LightGBM text format (fast load, fallback)
     - model.pkl           — joblib-pickled LGBMClassifier (legacy fallback)
     - train_medians.npy   — per-feature NaN imputation medians (32 values)
-    - threshold_biases.npy — per-class log-probability biases [0, 0.759, 0.658]
+    - threshold_biases.npy — per-class log-probability biases
 
 The model was trained on 35 features: the 32 in ``SELECTED_FEATURES`` plus
 3 rebel-group class-prior columns appended at training time.  At inference,
@@ -89,7 +89,7 @@ _GLOBAL_CLASS_PRIOR: np.ndarray = np.array(
 
 # Production threshold biases found via OOB optimisation on Colab.
 # Applied as: preds = argmax(log(proba) + BIASES)
-PRODUCTION_BIASES: np.ndarray = np.array([0.000000, 0.759494, 0.658228])
+PRODUCTION_BIASES: np.ndarray = np.array([0.000000, 1.265823, 1.063291])
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ class _ONNXBackend:
                 f"ONNX model expects {n_feat} input features, "
                 f"but the pipeline provides {expected} (32 base + 3 priors). "
                 "The ONNX file is outdated — regenerate it with "
-                "``python scripts/generate_onnx.py``."
+                "``make export-model``."
             )
         # Force JIT compilation now so first real inference call is fast.
         self._session.run(  # type: ignore[union-attr]
@@ -159,8 +159,8 @@ class RocketClassifier:
     Usage::
 
         clf = RocketClassifier.from_artifacts(
-            model_path="weights/model.lgb",
-            medians_path="weights/train_medians.npy",
+            model_path="models/model.lgb",
+            medians_path="models/train_medians.npy",
         )
         preds = clf.predict(feature_df)
     """

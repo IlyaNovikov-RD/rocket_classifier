@@ -2,13 +2,13 @@
 """Download production model artifacts from GitHub Release.
 
 Downloads model.onnx, model.lgb, train_medians.npy, and
-threshold_biases.npy from the latest GitHub Release into weights/.
+threshold_biases.npy from the latest GitHub Release into models/.
 Required before running the inference pipeline
 (``python -m rocket_classifier.main``).
 
 Usage:
-    python download_weights.py
-    # or: make download-weights
+    python download_models.py
+    # or: make download-models
 """
 
 from __future__ import annotations
@@ -34,14 +34,14 @@ CACHE_ARTIFACTS = [
 ]
 
 ROOT = Path(__file__).parent.parent
-WEIGHTS_DIR = ROOT / "weights"
+WEIGHTS_DIR = ROOT / "models"
 CACHE_DIR = ROOT / "cache"
 WEIGHTS_DIR.mkdir(exist_ok=True)
 CACHE_DIR.mkdir(exist_ok=True)
 
 
 def main(include_caches: bool = False) -> None:
-    """Download model artifacts from GitHub Release into weights/ and cache/.
+    """Download model artifacts from GitHub Release into models/ and cache/.
 
     Args:
         include_caches: If True, also downloads parquet feature caches (~15 MB).
