@@ -101,6 +101,11 @@ class TestMinClassRecall:
         result = min_class_recall(y, y)
         assert isinstance(result, float)
 
+    def test_empty_arrays_raises(self) -> None:
+        """Empty inputs should raise ValueError (np.min of empty sequence)."""
+        with pytest.raises(ValueError):
+            min_class_recall(np.array([], dtype=int), np.array([], dtype=int))
+
     def test_absent_class_ignored(self) -> None:
         """Classes absent from y_true must not affect the metric.
 
@@ -213,7 +218,7 @@ class TestRocketClassifierPredict:
         clf = _make_clf(proba)
         X = np.zeros((1, N_FEATURES))
         preds = clf.predict(X)
-        assert preds.dtype == np.dtype("int")
+        assert np.issubdtype(preds.dtype, np.integer)
         assert preds[0] in {0, 1, 2}
 
     def test_predict_argmax_no_bias(self) -> None:

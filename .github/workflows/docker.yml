@@ -18,14 +18,20 @@ jobs:
       - name: Build image
         run: docker build -t rocket-classifier .
 
-      - name: Smoke test — container starts and prints help
+      - name: Smoke test — container starts and validates artifacts
         run: |
           docker run --rm rocket-classifier \
             uv run python -c "
+          from pathlib import Path
           from rocket_classifier.model import RocketClassifier, SELECTED_FEATURES, PRODUCTION_BIASES
           assert len(SELECTED_FEATURES) == 32
           assert PRODUCTION_BIASES.shape == (3,)
+          # Verify model artifacts were downloaded during build
+          models = Path('/app/models')
+          assert (models / 'model.lgb').exists(), 'model.lgb not found'
+          assert (models / 'train_medians.npy').exists(), 'train_medians.npy not found'
           print('Model package imports OK')
           print(f'  SELECTED_FEATURES: {len(SELECTED_FEATURES)} features')
           print(f'  PRODUCTION_BIASES: {PRODUCTION_BIASES.tolist()}')
+          print(f'  model.lgb: {(models / \"model.lgb\").stat().st_size} bytes')
           "

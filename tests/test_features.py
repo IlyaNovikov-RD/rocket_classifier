@@ -278,6 +278,27 @@ class TestSafeStats:
 # ===========================================================================
 
 
+class TestEmptyTrajectory:
+    """An empty DataFrame (0 points) must return all-NaN features without crashing."""
+
+    def test_zero_point_trajectory_returns_all_keys(self):
+        group = pd.DataFrame(columns=["time_stamp", "x", "y", "z"])
+        group["time_stamp"] = pd.to_datetime(group["time_stamp"])
+        feats = _extract_trajectory_features(group)
+        missing = ALL_EXPECTED_KEYS - feats.keys()
+        assert not missing, f"Missing keys for 0-point trajectory: {missing}"
+
+    def test_zero_point_trajectory_all_nan(self):
+        group = pd.DataFrame(columns=["time_stamp", "x", "y", "z"])
+        group["time_stamp"] = pd.to_datetime(group["time_stamp"])
+        feats = _extract_trajectory_features(group)
+        for key in ALL_EXPECTED_KEYS:
+            if key == "n_points":
+                assert feats[key] == 0.0
+            else:
+                assert math.isnan(feats[key]), f"{key} should be NaN for 0-point trajectory"
+
+
 class TestExtractTrajFeaturesKeyCompleteness:
     """Every trajectory length must return the full, consistent key set."""
 
@@ -640,10 +661,19 @@ class TestBuildFeatures:
         assert "label" not in result.columns
 
     def test_feature_count_matches_expected(self):
-        """76 kinematic + 7 salvo/group features + label + launch_time = 85 columns."""
+        """76 kinematic + 7 salvo/group + label + launch_time = 85 columns."""
+        n_kinematic = 76
+        n_salvo_group = 7
+        n_label = 1
+        n_launch_time = 1
+        expected = n_kinematic + n_salvo_group + n_label + n_launch_time
         df = self._make_raw_df(include_label=True)
         result = build_features(df)
-        assert result.shape[1] == 85
+        assert result.shape[1] == expected, (
+            f"Expected {expected} columns "
+            f"({n_kinematic} kinematic + {n_salvo_group} salvo/group "
+            f"+ {n_label} label + {n_launch_time} launch_time), got {result.shape[1]}"
+        )
 
     def test_launch_time_column_present(self):
         """build_features must store launch_time so inference does not need raw CSV."""
@@ -681,6 +711,44 @@ class TestBuildFeatures:
             f"build_features() is missing features required by model.py: {missing}\n"
             "Update features.py or SELECTED_FEATURES in model.py to stay in sync."
         )
+
+    def test_multi_trajectory_dbscan_group_features(self):
+        """With two clusters of trajectories at distinct positions, DBSCAN
+        rebel-group clustering assigns them to real groups (not all noise=-1),
+        exercising the group_total_rockets / group_n_salvos / group_max_salvo_size paths."""
+        rows = []
+        # Cluster A: 5 trajectories near (0, 0), close in time
+        for traj_id in range(5):
+            for i in range(4):
+                rows.append({
+                    "traj_ind": traj_id,
+                    "time_stamp": f"2024-01-01 00:00:0{i}.{traj_id:06d}",
+                    "x": float(i) + traj_id * 0.001,
+                    "y": traj_id * 0.001,
+                    "z": float(i) * 0.5,
+                    "label": 0,
+                })
+        # Cluster B: 5 trajectories near (1000, 1000), close in time
+        for traj_id in range(5, 10):
+            for i in range(4):
+                rows.append({
+                    "traj_ind": traj_id,
+                    "time_stamp": f"2024-01-01 00:00:0{i}.{traj_id:06d}",
+                    "x": 1000.0 + float(i) + (traj_id - 5) * 0.001,
+                    "y": 1000.0 + (traj_id - 5) * 0.001,
+                    "z": float(i) * 0.5,
+                    "label": 1,
+                })
+        df = pd.DataFrame(rows)
+        result = build_features(df)
+        assert len(result) == 10
+        # With two well-separated clusters, DBSCAN should find >= 2 groups
+        # and assign trajectories to groups with total_rockets >= 3
+        assert (result["group_total_rockets"] >= 3).any(), (
+            "At least some trajectories should be in a real rebel group"
+        )
+        assert (result["group_n_salvos"] >= 1).all()
+        assert (result["group_max_salvo_size"] >= 1).all()
 
     def test_mixed_timestamp_formats(self):
         """Timestamps with and without microseconds must parse without error."""

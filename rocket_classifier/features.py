@@ -138,6 +138,25 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     n_points = len(pos)
     feats["n_points"] = float(n_points)
 
+    if n_points == 0:
+        # Empty trajectory: return all NaN for every expected feature.
+        for prefix in [
+            "speed", "vx", "vy", "vz", "v_horiz", "acc_mag", "az", "acc_horiz", "jerk_mag",
+        ]:
+            for stat in ["mean", "std", "min", "max", "median"]:
+                feats[f"{prefix}_{stat}"] = np.nan
+        for k in [
+            "total_duration_s", "dt_mean", "dt_std", "dt_min", "dt_max", "dt_median",
+            "launch_angle_elev", "launch_angle_azimuth",
+            "initial_speed", "initial_vz", "initial_v_horiz", "final_speed", "final_vz",
+            "mean_az", "apogee_z", "initial_z", "final_z", "delta_z_total", "apogee_relative",
+            "apogee_time_frac", "time_to_apogee_s",
+            "x_range", "y_range", "z_range", "max_horiz_range", "final_horiz_range",
+            "path_length_3d", "launch_x", "launch_y", "launch_z",
+        ]:
+            feats[k] = np.nan
+        return feats
+
     # --- Time features ---
     dt_ns = np.diff(times).astype(np.float64)  # nanoseconds
     dt_sec = dt_ns / 1e9  # seconds

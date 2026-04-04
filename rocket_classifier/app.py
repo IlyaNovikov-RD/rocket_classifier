@@ -44,6 +44,7 @@ BIASES_PATH = _MODELS / "threshold_biases.npy"
 _RELEASE_BASE = "https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download"
 # All backends in the order RocketClassifier.from_artifacts() tries them.
 _RELEASE_ARTIFACTS: dict[Path, str] = {
+    _MODELS / "model_opt.onnx": f"{_RELEASE_BASE}/model_opt.onnx",
     _MODELS / "model.onnx": f"{_RELEASE_BASE}/model.onnx",
     _MODELS / "model.lgb": f"{_RELEASE_BASE}/model.lgb",
     MEDIANS_PATH: f"{_RELEASE_BASE}/train_medians.npy",
@@ -89,9 +90,9 @@ def _ensure_artifact(path: Path, url: str) -> bool:
 def load_classifier() -> RocketClassifier | None:
     """Load the RocketClassifier, downloading artifacts from GitHub Release if needed.
 
-    Downloads all backends (ONNX, native LightGBM, pkl) so
+    Downloads ONNX and native LightGBM backends so
     ``RocketClassifier.from_artifacts`` picks the fastest available one:
-    ONNX → native LightGBM → pkl.
+    model_opt.onnx → model.onnx → model.lgb.
 
     Returns:
         A ready-to-use ``RocketClassifier``, or ``None`` if artifacts are unavailable.

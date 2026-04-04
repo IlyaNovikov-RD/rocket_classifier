@@ -172,7 +172,7 @@ def apply_salvo_consensus(y_pred: np.ndarray, group_ids: np.ndarray) -> np.ndarr
     # strict-majority (top_count > rest) to groups of size ≥ 2.
     _, gid_inverse, gid_counts = np.unique(group_ids, return_inverse=True, return_counts=True)
 
-    n_classes = int(y_pred.max()) + 1
+    n_classes = 3  # Model always has 3 classes
     group_class_votes = np.zeros((len(gid_counts), n_classes), dtype=np.int32)
     np.add.at(group_class_votes, (gid_inverse, y_pred), 1)
 
