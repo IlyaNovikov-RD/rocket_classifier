@@ -640,10 +640,17 @@ class TestBuildFeatures:
         assert "label" not in result.columns
 
     def test_feature_count_matches_expected(self):
-        """76 kinematic + 7 salvo/group features + label = 84 columns for labeled data."""
+        """76 kinematic + 7 salvo/group features + label + launch_time = 85 columns."""
         df = self._make_raw_df(include_label=True)
         result = build_features(df)
-        assert result.shape[1] == 84
+        assert result.shape[1] == 85
+
+    def test_launch_time_column_present(self):
+        """build_features must store launch_time so inference does not need raw CSV."""
+        df = self._make_raw_df(include_label=False)
+        result = build_features(df)
+        assert "launch_time" in result.columns
+        assert pd.api.types.is_datetime64_any_dtype(result["launch_time"])
 
     def test_unsorted_input_sorted_correctly(self):
         """Points provided in reverse time order must produce the same result
