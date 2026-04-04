@@ -6,9 +6,9 @@ name: Post-Release Pipeline
 #   2. Export model.lgb → model.onnx (fastest inference backend)
 #   3. Run inference pipeline → submission.csv
 #   4. Run interpretability analysis → SHAP plot + report
-#   5. Upload submission.csv + model.onnx to the release assets
-#   6. Commit updated assets/ back to main
+#   5. Upload submission.csv, model.onnx, and SHAP assets to the release
 #
+# All generated artifacts are uploaded to the release — no direct push to main.
 # The only step that requires a human: publishing the GitHub Release.
 
 on:
@@ -21,7 +21,7 @@ jobs:
     name: Inference + Interpretability
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed to commit assets back to repo
+      contents: write   # needed to upload release assets
 
     steps:
       - name: Checkout repository
@@ -83,14 +83,14 @@ jobs:
           gh release delete-asset "$TAG" submission.csv --yes 2>/dev/null || true
           gh release upload "$TAG" outputs/submission.csv
 
-      - name: Commit updated assets
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: |
-            docs: regenerate artifacts after ${{ github.event.release.tag_name }} release [skip ci]
-
-            - assets/shap_summary.png (SHAP feature importance)
-            - assets/interpretation_report.txt (ranked feature report)
-          file_pattern: "assets/shap_summary.png assets/interpretation_report.txt"
-          commit_user_name: "github-actions[bot]"
-          commit_user_email: "github-actions[bot]@users.noreply.github.com"
+      - name: Upload SHAP assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          gh release delete-asset "$TAG" shap_summary.png --yes 2>/dev/null || true
+          gh release delete-asset "$TAG" interpretation_report.txt --yes 2>/dev/null || true
+          gh release upload "$TAG" assets/shap_summary.png assets/interpretation_report.txt
