@@ -499,6 +499,23 @@ cache/                          # Feature caches — gitignored
 
 ---
 
+## Engineering Practices
+
+The automation in this project is not boilerplate — each choice directly serves a goal of the assignment.
+
+| Practice | What it does | Why it matters here |
+|---|---|---|
+| **113 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
+| **CI on every PR** | Runs lint + tests + Docker build | Ensures the inference pipeline (`make run`) stays reproducible on any machine, not just the developer's laptop. |
+| **Docker** | Packages the full inference environment | Makes the submission pipeline portable — one `docker run` reproduces the exact result with no dependency drift. |
+| **`make run`** | Single command → `outputs/submission.csv` | The submission is the deliverable. One command replicates the full result from cached features, with no manual steps. |
+| **`make release TAG=... NOTES=...`** | Validates all artifacts exist, creates GitHub Release, triggers post-release CI | Prevents the class of error we hit during development: forgetting to upload a cache file and silently breaking the pipeline. |
+| **Post-release CI pipeline** | Auto-generates ONNX model, runs inference, computes SHAP, uploads all to the release | Ensures the published release is always self-consistent — the submission.csv and SHAP plot in the release are always derived from the model in the same release. |
+| **`make download-models && make run`** | Reproduces the submission from scratch | Satisfies the reproducibility requirement: a grader can verify the result independently by running two commands. |
+| **Dependabot** | Weekly dependency update PRs | Keeps the pipeline secure and working as the ecosystem moves forward — relevant for a project that may be evaluated weeks after submission. |
+
+---
+
 ## How 1.0 Was Achieved
 
 ### Step 1 — Oracle analysis confirmed the signal exists
