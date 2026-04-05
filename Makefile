@@ -17,7 +17,7 @@
 #   make visualize         Regenerate demo.png (physics feature visualization)
 #   make pipeline          Full local pipeline: download-all → run → interpret
 #   make docker            Build + run Docker image → outputs/submission.csv
-#   make clean             Remove outputs/, cache/, models/ for a fresh cold start
+#   make clean             Remove outputs/, cache/, artifacts/ for a fresh cold start
 #
 # After training a new model (research/train.py):
 #   make export-model                         # build model.onnx + model_opt.onnx
@@ -65,8 +65,8 @@ export-model:
 	uv run python scripts/export_fast_models.py
 
 clean:
-	rm -rf outputs/ cache/ models/ __pycache__ rocket_classifier/__pycache__ tests/__pycache__
-	@echo "Cleaned outputs/, cache/, models/, and __pycache__. Run make download-all to re-fetch artifacts."
+	rm -rf outputs/ cache/ artifacts/ __pycache__ rocket_classifier/__pycache__ tests/__pycache__
+	@echo "Cleaned outputs/, cache/, artifacts/, and __pycache__. Run make download-all to re-fetch artifacts."
 
 docker:
 	docker build -t rocket_classifier .
@@ -77,26 +77,26 @@ pipeline: download-all run interpret
 
 # Create a GitHub Release with all required artifacts.
 # Usage: make release TAG=v1.x.0 NOTES="What changed"
-# Requires: models/ and cache/ populated (run research/train.py first).
+# Requires: artifacts/ and cache/ populated (run research/train.py first).
 # After publishing, the post-release CI pipeline triggers automatically.
 release:
 	@test -n "$(TAG)"   || (echo "Usage: make release TAG=v1.x.0 NOTES='...'"; exit 1)
 	@test -n "$(NOTES)" || (echo "Usage: make release TAG=v1.x.0 NOTES='...'"; exit 1)
-	@test -f models/model.lgb           || (echo "models/model.lgb not found — run research/train.py first"; exit 1)
-	@test -f models/train_medians.npy   || (echo "models/train_medians.npy not found"; exit 1)
-	@test -f models/threshold_biases.npy || (echo "models/threshold_biases.npy not found"; exit 1)
-	@test -f models/model_opt.onnx      || (echo "models/model_opt.onnx not found — run: make export-model"; exit 1)
-	@test -f models/model.onnx          || (echo "models/model.onnx not found — run: make export-model"; exit 1)
+	@test -f artifacts/model.lgb           || (echo "artifacts/model.lgb not found — run research/train.py first"; exit 1)
+	@test -f artifacts/train_medians.npy   || (echo "artifacts/train_medians.npy not found"; exit 1)
+	@test -f artifacts/threshold_biases.npy || (echo "artifacts/threshold_biases.npy not found"; exit 1)
+	@test -f artifacts/model_opt.onnx      || (echo "artifacts/model_opt.onnx not found — run: make export-model"; exit 1)
+	@test -f artifacts/model.onnx          || (echo "artifacts/model.onnx not found — run: make export-model"; exit 1)
 	@test -f cache/cache_train_features.parquet || (echo "cache/cache_train_features.parquet not found"; exit 1)
 	@test -f cache/cache_test_features.parquet  || (echo "cache/cache_test_features.parquet not found"; exit 1)
 	@test -f data/test.csv              || (echo "data/test.csv not found"; exit 1)
 	@test -f data/sample_submission.csv || (echo "data/sample_submission.csv not found"; exit 1)
 	gh release create $(TAG) \
-	  models/model.lgb \
-	  models/model.onnx \
-	  models/model_opt.onnx \
-	  models/train_medians.npy \
-	  models/threshold_biases.npy \
+	  artifacts/model.lgb \
+	  artifacts/model.onnx \
+	  artifacts/model_opt.onnx \
+	  artifacts/train_medians.npy \
+	  artifacts/threshold_biases.npy \
 	  training_report.json \
 	  cache/cache_train_features.parquet \
 	  cache/cache_test_features.parquet \

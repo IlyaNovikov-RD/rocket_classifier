@@ -20,7 +20,7 @@ cache/
 
 # ── Model artifacts (served from latest GitHub Release) ──────────────────────
 # Download with: make download-models
-models/
+artifacts/
 
 # ── Pipeline outputs ──────────────────────────────────────────────────────────
 outputs/

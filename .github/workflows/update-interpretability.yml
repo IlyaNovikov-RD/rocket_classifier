@@ -59,9 +59,9 @@ jobs:
             TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
           fi
           gh release delete-asset "$TAG" model.onnx --yes 2>/dev/null || true
-          gh release upload "$TAG" models/model.onnx
+          gh release upload "$TAG" artifacts/model.onnx
           gh release delete-asset "$TAG" model_opt.onnx --yes 2>/dev/null || true
-          gh release upload "$TAG" models/model_opt.onnx
+          gh release upload "$TAG" artifacts/model_opt.onnx
 
       - name: Run inference pipeline
         run: uv run python -m rocket_classifier.main

@@ -183,7 +183,7 @@ LightGBM + Optuna (GPU, stops when OOB consensus = 1.0) ──► hyperparameter
 Proximity Consensus Validation ──► group purity 100%, n_broken 0, OOB = 1.0
     │
     ▼
-models/model.lgb  ·  models/train_medians.npy  ·  models/threshold_biases.npy
+artifacts/model.lgb  ·  artifacts/train_medians.npy  ·  artifacts/threshold_biases.npy
 ```
 
 ### Production Inference Pipeline (`make run`)
@@ -196,8 +196,8 @@ Select 32 production features + impute NaN with train_medians.npy
 Append global class priors [0.686, 0.243, 0.071] → 35-column model input
     │
     ▼
-models/model.onnx  ──►  ONNX Runtime (AVX2, all cores, JIT pre-warmed)
-         ↑ requires make export-model; falls back to models/model.lgb if absent
+artifacts/model.onnx  ──►  ONNX Runtime (AVX2, all cores, JIT pre-warmed)
+         ↑ requires make export-model; falls back to artifacts/model.lgb if absent
     │
     ▼
 log(proba) + biases [0.000000, -0.253165, 1.265823]  ──►  argmax
@@ -353,7 +353,7 @@ make pipeline
 # Output: outputs/submission.csv  +  updated assets/
 
 # Step by step:
-make download-all    # models/ + cache/ + data/ (test.csv, sample_submission.csv)
+make download-all    # artifacts/ + cache/ + data/ (test.csv, sample_submission.csv)
 make run             # → outputs/submission.csv
 make interpret       # → assets/shap_summary.png
 make visualize       # → assets/demo.png
@@ -373,7 +373,7 @@ make test             # unit tests
 make lint             # ruff check
 make format           # ruff format
 make demo             # streamlit demo (localhost:8501)
-make download-models # fetch models/ from GitHub Release
+make download-models # fetch artifacts/ from GitHub Release
 make download-all     # + cache/ parquet caches + data/ (test.csv, sample_submission.csv)
 make export-model     # convert model.lgb → model.onnx (run after model update)
 make run              # inference pipeline → outputs/submission.csv
@@ -381,7 +381,7 @@ make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 make pipeline         # download-all + run + interpret  (full end-to-end)
 make docker           # build + run Docker image → outputs/submission.csv
-make clean            # remove outputs/, cache/, models/ for a fresh cold start
+make clean            # remove outputs/, cache/, artifacts/ for a fresh cold start
 ```
 
 ### Docker
@@ -430,7 +430,7 @@ tests/
 ├── test_schema.py              # Schema validation unit tests
 └── test_consensus.py           # Proximity consensus unit tests
 
-models/                        # Model artifacts — gitignored, from GitHub Release
+artifacts/                        # Model artifacts — gitignored, from GitHub Release
 ├── model.onnx                  # ONNX format — fastest inference (run: make export-model)
 ├── model.lgb                   # Native LightGBM — present after training
 ├── train_medians.npy           # 32-feature NaN imputation medians

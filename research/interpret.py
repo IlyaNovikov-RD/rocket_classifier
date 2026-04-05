@@ -157,8 +157,8 @@ def load_model(
     receives the correct shape, then report SHAP values only for the 32
     interpretable features (the priors are constant → near-zero SHAP).
     """
-    model_path = ROOT / "models" / "model.lgb"
-    medians_path = ROOT / "models" / "train_medians.npy"
+    model_path = ROOT / "artifacts" / "model.lgb"
+    medians_path = ROOT / "artifacts" / "train_medians.npy"
 
     if not model_path.exists():
         msg = f"Model not found at {model_path}. Run: make download-models"
@@ -186,7 +186,7 @@ def load_model(
     # regardless of whether model.onnx is also present.
     import lightgbm as _lgb
 
-    lgb_path = ROOT / "models" / "model.lgb"
+    lgb_path = ROOT / "artifacts" / "model.lgb"
     if not lgb_path.exists():
         raise FileNotFoundError(
             f"{lgb_path} not found. Run: make download-models\n"

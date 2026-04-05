@@ -256,20 +256,20 @@ class TestRocketClassifierPredict:
         assert np.isfinite(PRODUCTION_BIASES).all()
 
     def test_model_feature_count(self) -> None:
-        """models/model.lgb must expect exactly 35 features (32 selected + 3 priors).
+        """artifacts/model.lgb must expect exactly 35 features (32 selected + 3 priors).
 
         The LightGBM native backend does not validate feature count at inference
         time — wrong-shaped input produces silently incorrect predictions.
         This test catches the case where a model trained with different features
-        is uploaded to models/.
+        is uploaded to artifacts/.
 
-        Skipped if models/model.lgb is not present (CI without downloaded artifacts).
+        Skipped if artifacts/model.lgb is not present (CI without downloaded artifacts).
         """
         import lightgbm as lgb
 
-        model_path = Path(__file__).parent.parent / "models" / "model.lgb"
+        model_path = Path(__file__).parent.parent / "artifacts" / "model.lgb"
         if not model_path.exists():
-            pytest.skip("models/model.lgb not found — skipping feature count check")
+            pytest.skip("artifacts/model.lgb not found — skipping feature count check")
         booster = lgb.Booster(model_file=str(model_path))
         expected = len(SELECTED_FEATURES) + 3  # 32 base + 3 rebel-group priors
         assert booster.num_feature() == expected, (

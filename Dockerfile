@@ -23,7 +23,7 @@ RUN uv sync --frozen --no-dev
 RUN uv run python scripts/download_models.py --with-caches
 
 # Pre-create runtime directories
-RUN mkdir -p cache models outputs
+RUN mkdir -p cache artifacts outputs
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser

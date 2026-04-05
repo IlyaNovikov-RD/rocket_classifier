@@ -10,7 +10,7 @@ make lock             # uv lock — regenerate uv.lock from pyproject.toml
 make test             # uv run pytest tests/ -v
 make lint             # uv run ruff check .
 make format           # uv run ruff format .
-make download-models # fetch model artifacts from latest GitHub Release into models/
+make download-models # fetch model artifacts from latest GitHub Release into artifacts/
 make download-all     # + feature caches into cache/ + test.csv/sample_submission.csv into data/
 make run              # inference pipeline → outputs/submission.csv
 make pipeline         # download-all + run + interpret (full end-to-end)
@@ -19,7 +19,7 @@ make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 make export-model     # convert model.lgb → model.onnx + model_opt.onnx (required before release; requires onnxmltools)
 make docker           # build + run Docker image → outputs/submission.csv
-make clean            # remove outputs/, cache/, models/ for a fresh cold start
+make clean            # remove outputs/, cache/, artifacts/ for a fresh cold start
 make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts (ONNX required)
 ```
 
@@ -38,7 +38,7 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 **Research scripts** (`research/`): Training and analysis scripts. These import `optuna`, `lightgbm` and other libraries not in production deps — that's intentional. Never move these into `rocket_classifier/`.
 - `train.py` — full training pipeline: feature engineering → Optuna → proximity consensus → artifacts → 1.000000 OOB
 
-**Model artifacts** (`models/`): Gitignored. Downloaded from the latest GitHub Release via `download_models.py`. Uses `releases/latest/download` URLs — never hardcode version numbers.
+**Model artifacts** (`artifacts/`): Gitignored. Downloaded from the latest GitHub Release via `download_models.py`. Uses `releases/latest/download` URLs — never hardcode version numbers.
 
 **Feature caches** (`cache/`): Gitignored parquet files. Regenerated from `data/` or downloaded from release.
 
@@ -47,10 +47,10 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 - **Metric**: `min_class_recall` — worst-class recall. Every design choice optimises for this, not accuracy.
 - **32 features**: 25 kinematic features that survived backward elimination, plus 7 salvo/group features from domain assumptions. Production code only computes these 32 — the 51 eliminated features are no longer extracted.
 - **Model input = 35**: The model was trained with 32 base features + 3 rebel-group class-prior columns appended per fold. At production inference `_GLOBAL_CLASS_PRIOR` (the training class distribution) substitutes for those 3 columns — they have near-zero feature importance.
-- **Threshold biases** `[0.000000, -0.253165, 1.265823]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `models/threshold_biases.npy` and `training_report.json`.
+- **Threshold biases** `[0.000000, -0.253165, 1.265823]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `artifacts/threshold_biases.npy` and `training_report.json`.
 - **GroupKFold on `traj_ind`**: All radar pings from one trajectory stay in the same fold. Prevents data leakage.
 - **No training in production**: Model was trained via `research/train.py`. `rocket_classifier/` only does inference.
-- **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools`) to rebuild `models/model.onnx` and `models/model_opt.onnx` (pre-graph-optimized, ~0.3s faster to load) and benchmark all backends.
+- **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools`) to rebuild `artifacts/model.onnx` and `artifacts/model_opt.onnx` (pre-graph-optimized, ~0.3s faster to load) and benchmark all backends.
 
 ## Linting
 
