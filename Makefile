@@ -16,8 +16,8 @@
 #   make interpret         Regenerate SHAP plot + report after a new model is deployed
 #   make visualize         Regenerate demo.png (physics feature visualization)
 #   make pipeline          Full local pipeline: download-all → run → interpret
-#   make docker            Build + run Docker image → outputs/submission.csv
-#   make clean             Remove outputs/, cache/, artifacts/ for a fresh cold start
+#   make docker            Build + run Docker image → output/submission.csv
+#   make clean             Remove output/, cache/, artifacts/ for a fresh cold start
 #
 # After training a new model (research/train.py):
 #   make export-model                         # build model.onnx + model_opt.onnx
@@ -65,12 +65,12 @@ export-model:
 	uv run python scripts/export_fast_models.py
 
 clean:
-	rm -rf outputs/ cache/ artifacts/ __pycache__ rocket_classifier/__pycache__ tests/__pycache__
-	@echo "Cleaned outputs/, cache/, artifacts/, and __pycache__. Run make download-all to re-fetch artifacts."
+	rm -rf output/ cache/ artifacts/ __pycache__ rocket_classifier/__pycache__ tests/__pycache__
+	@echo "Cleaned output/, cache/, artifacts/, and __pycache__. Run make download-all to re-fetch artifacts."
 
 docker:
 	docker build -t rocket_classifier .
-	docker run --rm -v $$(pwd)/outputs:/app/outputs rocket_classifier
+	docker run --rm -v $$(pwd)/output:/app/output rocket_classifier
 
 pipeline: download-all run interpret
 	@echo "Pipeline complete. submission.csv and assets/ are up to date."

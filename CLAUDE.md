@@ -12,14 +12,14 @@ make lint             # uv run ruff check .
 make format           # uv run ruff format .
 make download-models # fetch model artifacts from latest GitHub Release into artifacts/
 make download-all     # + feature caches into cache/ + test.csv/sample_submission.csv into data/
-make run              # inference pipeline → outputs/submission.csv
+make run              # inference pipeline → output/submission.csv
 make pipeline         # download-all + run + interpret (full end-to-end)
 make demo             # launch Streamlit app (localhost:8501)
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 make export-model     # convert model.lgb → model.onnx + model_opt.onnx (required before release; requires onnxmltools)
-make docker           # build + run Docker image → outputs/submission.csv
-make clean            # remove outputs/, cache/, artifacts/ for a fresh cold start
+make docker           # build + run Docker image → output/submission.csv
+make clean            # remove output/, cache/, artifacts/ for a fresh cold start
 make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts (ONNX required)
 ```
 
@@ -32,7 +32,7 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 - `features.py` — Extracts 32 features per trajectory: 25 kinematic features from raw `(x, y, z, time_stamp)` radar pings via finite-difference kinematics, plus 7 salvo/rebel-group features from DBSCAN clustering (domain assumptions 3a-3c). Single source of truth for feature engineering.
 - `model.py` — `RocketClassifier` class. Backend selected automatically: `model_opt.onnx` (pre-optimized ONNX, fastest) → `model.onnx` → `model.lgb`. Contains `SELECTED_FEATURES` (32 features used in production: 25 kinematic + 7 salvo/group), `PRODUCTION_BIASES` (threshold-tuned log-probability biases), and `_GLOBAL_CLASS_PRIOR` (appended rebel-group prior columns). These are the single source of truth — never duplicate them.
 - `schema.py` — Pydantic v2 validation for raw radar data (`TrajectoryPoint`, `validate_dataframe`).
-- `main.py` — Orchestrates: load data → validate → featurize → predict → proximity consensus → write `outputs/submission.csv`.
+- `main.py` — Orchestrates: load data → validate → featurize → predict → proximity consensus → write `output/submission.csv`.
 - `app.py` — Streamlit demo. Downloads model from GitHub Release if not local. Uses `_extract_trajectory_features` from `features.py` directly (salvo features unavailable for single-trajectory demo — imputed from medians).
 
 **Research scripts** (`research/`): Training and analysis scripts. These import `optuna`, `lightgbm` and other libraries not in production deps — that's intentional. Never move these into `rocket_classifier/`.

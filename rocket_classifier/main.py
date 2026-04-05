@@ -31,8 +31,8 @@ _ROOT = Path(__file__).parent.parent
 DATA_DIR = _ROOT / "data"
 ARTIFACTS_DIR = _ROOT / "artifacts"
 CACHE_DIR = _ROOT / "cache"
-OUTPUTS_DIR = _ROOT / "outputs"
-OUTPUT_PATH = OUTPUTS_DIR / "submission.csv"
+OUTPUT_DIR = _ROOT / "output"
+OUTPUT_PATH = OUTPUT_DIR / "submission.csv"
 MODEL_PATH = ARTIFACTS_DIR / "model.lgb"  # from_artifacts resolves .onnx/.lgb in order
 MEDIANS_PATH = ARTIFACTS_DIR / "train_medians.npy"
 BIASES_PATH = ARTIFACTS_DIR / "threshold_biases.npy"
@@ -203,7 +203,7 @@ def main() -> None:
     """
     t_start = time.time()
     CACHE_DIR.mkdir(exist_ok=True)
-    OUTPUTS_DIR.mkdir(exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
 
     both_caches_exist = (
         FEATURE_CACHE_TRAIN.exists() or FEATURE_CACHE_TRAIN.with_suffix(".feather").exists()
