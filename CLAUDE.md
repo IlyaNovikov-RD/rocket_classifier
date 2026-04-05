@@ -17,7 +17,7 @@ make pipeline         # download-all + run + interpret (full end-to-end)
 make demo             # launch Streamlit app (localhost:8501)
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
-make export-model     # convert model.lgb → model.onnx + model_opt.onnx (required before release; requires onnxmltools skl2onnx)
+make export-model     # convert model.lgb → model.onnx + model_opt.onnx (required before release; requires onnxmltools)
 make docker           # build + run Docker image → outputs/submission.csv
 make clean            # remove outputs/, cache/, models/ for a fresh cold start
 make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts (ONNX required)
@@ -50,7 +50,7 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 - **Threshold biases** `[0.000000, -0.253165, 1.265823]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `models/threshold_biases.npy` and `training_report.json`.
 - **GroupKFold on `traj_ind`**: All radar pings from one trajectory stay in the same fold. Prevents data leakage.
 - **No training in production**: Model was trained via `research/train.py`. `rocket_classifier/` only does inference.
-- **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools skl2onnx`) to rebuild `models/model.onnx` and `models/model_opt.onnx` (pre-graph-optimized, ~0.3s faster to load) and benchmark all backends.
+- **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools`) to rebuild `models/model.onnx` and `models/model_opt.onnx` (pre-graph-optimized, ~0.3s faster to load) and benchmark all backends.
 
 ## Linting
 
