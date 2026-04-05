@@ -20,7 +20,7 @@ COPY scripts/download_models.py ./scripts/
 RUN uv sync --frozen --no-dev
 
 # Download model artifacts from GitHub Release at build time
-RUN uv run python scripts/download_models.py
+RUN uv run python scripts/download_models.py --with-caches
 
 # Pre-create runtime directories
 RUN mkdir -p cache models outputs

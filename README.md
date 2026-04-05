@@ -113,7 +113,7 @@ LightGBM trained on 32 features (25 kinematic + 7 salvo/group)
 LightGBM + Optuna (GPU, stops when OOB consensus = 1.0) ──► hyperparameters
     │
     ▼
-10-fold GroupKFold OOB Threshold Tuning ──► biases [0.000000, 1.265823, 1.063291]
+10-fold GroupKFold OOB Threshold Tuning ──► biases [0.000000, -0.253165, 1.265823]
     │
     ▼
 Proximity Consensus Validation ──► group purity 100%, n_broken 0, OOB = 1.0
@@ -136,7 +136,7 @@ models/model.onnx  ──►  ONNX Runtime (AVX2, all cores, JIT pre-warmed)
          ↑ requires make export-model; falls back to models/model.lgb if absent
     │
     ▼
-log(proba) + biases [0.000000, 1.265823, 1.063291]  ──►  argmax
+log(proba) + biases [0.000000, -0.253165, 1.265823]  ──►  argmax
     │
     ▼
 Proximity consensus: group by launch position + 60 s window → mode vote
@@ -175,15 +175,18 @@ The production model is LightGBM, trained via GPU-accelerated Optuna search (sto
 
 | Parameter | Value | Rationale |
 |---|---|---|
-| `n_estimators` | 998 | Optuna-determined for this feature set |
-| `max_depth` | 5 | Leaf-wise growth on 32 features |
-| `num_leaves` | 50 | Optuna-determined |
-| `learning_rate` | 0.128 | Optuna-determined |
-| `subsample` | 0.730 | Row sampling found by Optuna |
-| `colsample_bytree` | 0.755 | Feature sampling found by Optuna |
+| `n_estimators` | 1108 | Optuna-determined for this feature set |
+| `max_depth` | 9 | Leaf-wise growth on 32 features |
+| `num_leaves` | 249 | Optuna-determined |
+| `learning_rate` | 0.02085 | Optuna-determined |
+| `subsample` | 0.673 | Row sampling found by Optuna |
+| `colsample_bytree` | 0.673 | Feature sampling found by Optuna |
+| `min_child_samples` | 37 | Optuna-determined |
+| `reg_alpha` | 0.00332 | L1 regularisation found by Optuna |
+| `reg_lambda` | 0.04205 | L2 regularisation found by Optuna |
 | `objective` | `multiclass` (softprob) | Calibrated probabilities for threshold tuning |
 
-Threshold biases: `[0.000000, 1.265823, 1.063291]` — upweights classes 1 and 2 to compensate for the 69%/24%/7% class imbalance. Found via coarse→fine grid search on OOB predictions.
+Threshold biases: `[0.000000, -0.253165, 1.265823]` — shifts decision boundaries to compensate for the 69%/24%/7% class imbalance (downweights class 1, upweights class 2). Found via coarse→fine grid search on OOB predictions.
 
 ### Class Imbalance Strategy
 
@@ -191,7 +194,7 @@ Threshold biases: `[0.000000, 1.265823, 1.063291]` — upweights classes 1 and 2
 
 ### Threshold Tuning
 
-LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on all OOB predictions simultaneously from 10-fold CV to maximise the min-recall metric via a coarse→fine grid search, producing `[0.000000, 1.265823, 1.063291]` for the current model.
+LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on all OOB predictions simultaneously from 10-fold CV to maximise the min-recall metric via a coarse→fine grid search, producing `[0.000000, -0.253165, 1.265823]` for the current model.
 
 ### Data Leakage Prevention
 
@@ -358,7 +361,7 @@ Radar stations (N radars across the operational theatre)
 
 ### Online salvo detection
 
-DBSCAN as currently implemented runs in batch (O(N²) for large clusters). In a streaming context, the salvo coordinator would use an **online spatial index** (e.g. R-tree or ball tree over a sliding 60-second window of recent launches) to assign incoming rockets to existing salvos or open a new salvo group. The DBSCAN parameters (`eps=0.5`, `min_samples=2`) remain unchanged — only the execution model shifts from batch to incremental.
+DBSCAN as currently implemented runs in batch (O(N²) for large clusters). In a streaming context, the salvo coordinator would use an **online spatial index** (e.g. R-tree or ball tree over a sliding 60-second window of recent launches) to assign incoming rockets to existing salvos or open a new salvo group. The salvo DBSCAN parameters (`eps=0.5`, `min_samples=2`) and group DBSCAN parameters (`eps=0.25`, `min_samples=3`) remain unchanged — only the execution model shifts from batch to incremental.
 
 ### Model retraining and class drift
 
@@ -425,7 +428,7 @@ make pipeline
 # Output: outputs/submission.csv  +  updated assets/
 
 # Step by step:
-make download-all    # models/ + cache/
+make download-all    # models/ + cache/ + data/ (test.csv, sample_submission.csv)
 make run             # → outputs/submission.csv
 make interpret       # → assets/shap_summary.png
 make visualize       # → assets/demo.png
@@ -440,12 +443,13 @@ make demo            # streamlit demo (localhost:8501)
 
 ```bash
 make install          # uv sync --group dev
+make lock             # uv lock — regenerate uv.lock from pyproject.toml
 make test             # unit tests
 make lint             # ruff check
 make format           # ruff format
 make demo             # streamlit demo (localhost:8501)
 make download-models # fetch models/ from GitHub Release
-make download-all     # + cache/ parquet caches
+make download-all     # + cache/ parquet caches + data/ (test.csv, sample_submission.csv)
 make export-model     # convert model.lgb/pkl → model.onnx (run after model update)
 make run              # inference pipeline → outputs/submission.csv
 make interpret        # regenerate SHAP assets after model update
@@ -455,9 +459,17 @@ make pipeline         # download-all + run + interpret  (full end-to-end)
 
 ### Docker
 
+The image is self-contained — model artifacts, feature caches, and `test.csv` are baked in at build time.
+
 ```bash
-docker build -t rocket-classifier .
-docker run -v $(pwd)/outputs:/app/outputs rocket-classifier
+docker build -t rocket_classifier .
+docker run --rm rocket_classifier          # writes submission.csv inside the container
+```
+
+To retrieve the output file:
+
+```bash
+docker run --rm -v $(pwd)/outputs:/app/outputs rocket_classifier
 ```
 
 ---
@@ -477,6 +489,9 @@ scripts/
 ├── download_models.py         # Download model artifacts from GitHub Release
 └── export_fast_models.py       # Export model.lgb → model.onnx + benchmark all backends
 
+requirements.txt               # pip-compatible export of production deps (uv export --no-dev)
+training_report.json           # Authoritative record of latest training run: OOB scores, biases, best hyperparameters (tracked in git, uploaded to every release)
+
 research/                       # R&D scripts (GPU training)
 ├── train.py                            # Full training pipeline → 1.0 OOB + artifacts
 ├── interpret.py                        # SHAP interpretability — run via `make interpret`
@@ -493,10 +508,10 @@ models/                        # Model artifacts — gitignored, from GitHub Rel
 ├── model.lgb                   # Native LightGBM — present after training
 ├── model.pkl                   # joblib LGBMClassifier — legacy fallback
 ├── train_medians.npy           # 32-feature NaN imputation medians
-└── threshold_biases.npy        # Per-class log-probability biases [0.000000, 1.265823, 1.063291]
+└── threshold_biases.npy        # Per-class log-probability biases [0.000000, -0.253165, 1.265823]
 
 cache/                          # Feature caches — gitignored
-├── cache_train_features.parquet   # 25-kinematic feature matrix (canonical)
+├── cache_train_features.parquet   # 32-feature matrix (25 kinematic + 7 salvo/group, with label)
 ├── cache_train_features.feather   # Arrow IPC sidecar — fast reads
 ├── cache_test_features.parquet    # 32-feature matrix (25 kinematic + 7 salvo/group)
 └── cache_test_features.feather
@@ -510,7 +525,7 @@ The automation in this project is not boilerplate — each choice directly serve
 
 | Practice | What it does | Why it matters here |
 |---|---|---|
-| **113 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
+| **105 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
 | **CI on every PR** | Runs lint + tests + Docker build | Ensures the inference pipeline (`make run`) stays reproducible on any machine, not just the developer's laptop. |
 | **Docker** | Packages the full inference environment | Makes the submission pipeline portable — one `docker run` reproduces the exact result with no dependency drift. |
 | **`make run`** | Single command → `outputs/submission.csv` | The submission is the deliverable. One command replicates the full result from cached features, with no manual steps. |
