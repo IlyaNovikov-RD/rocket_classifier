@@ -9,7 +9,7 @@ __pycache__
 research/
 data/
 cache/
-outputs/
+output/
 .venv
 .env
 *.pdf
