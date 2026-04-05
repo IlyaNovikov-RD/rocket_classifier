@@ -17,7 +17,7 @@ Note on salvo/group features in the demo:
     inference on a full test set computes all 32 features correctly.
 
 Model loading strategy (in priority order):
-    1. Local artifacts in models/ (ONNX → native LightGBM).
+    1. Local artifacts in artifacts/ (ONNX → native LightGBM).
     2. Remote download from the GitHub Release asset (automatic fallback).
 
 Run with:
@@ -37,16 +37,16 @@ import streamlit as st
 from rocket_classifier.features import _extract_trajectory_features
 from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
 
-_MODELS = Path(__file__).parent.parent / "models"
-MODEL_PATH = _MODELS / "model.lgb"  # base path — from_artifacts resolves .onnx/.lgb
-MEDIANS_PATH = _MODELS / "train_medians.npy"
-BIASES_PATH = _MODELS / "threshold_biases.npy"
+_ARTIFACTS = Path(__file__).parent.parent / "artifacts"
+MODEL_PATH = _ARTIFACTS / "model.lgb"  # base path — from_artifacts resolves .onnx/.lgb
+MEDIANS_PATH = _ARTIFACTS / "train_medians.npy"
+BIASES_PATH = _ARTIFACTS / "threshold_biases.npy"
 _RELEASE_BASE = "https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download"
 # All backends in the order RocketClassifier.from_artifacts() tries them.
 _RELEASE_ARTIFACTS: dict[Path, str] = {
-    _MODELS / "model_opt.onnx": f"{_RELEASE_BASE}/model_opt.onnx",
-    _MODELS / "model.onnx": f"{_RELEASE_BASE}/model.onnx",
-    _MODELS / "model.lgb": f"{_RELEASE_BASE}/model.lgb",
+    _ARTIFACTS / "model_opt.onnx": f"{_RELEASE_BASE}/model_opt.onnx",
+    _ARTIFACTS / "model.onnx": f"{_RELEASE_BASE}/model.onnx",
+    _ARTIFACTS / "model.lgb": f"{_RELEASE_BASE}/model.lgb",
     MEDIANS_PATH: f"{_RELEASE_BASE}/train_medians.npy",
     BIASES_PATH: f"{_RELEASE_BASE}/threshold_biases.npy",
 }
@@ -97,7 +97,7 @@ def load_classifier() -> RocketClassifier | None:
     Returns:
         A ready-to-use ``RocketClassifier``, or ``None`` if artifacts are unavailable.
     """
-    _MODELS.mkdir(exist_ok=True)
+    _ARTIFACTS.mkdir(exist_ok=True)
     for path, url in _RELEASE_ARTIFACTS.items():
         _ensure_artifact(path, url)
 

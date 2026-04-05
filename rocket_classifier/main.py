@@ -29,13 +29,13 @@ logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).parent.parent
 DATA_DIR = _ROOT / "data"
-MODELS_DIR = _ROOT / "models"
+ARTIFACTS_DIR = _ROOT / "artifacts"
 CACHE_DIR = _ROOT / "cache"
 OUTPUTS_DIR = _ROOT / "outputs"
 OUTPUT_PATH = OUTPUTS_DIR / "submission.csv"
-MODEL_PATH = MODELS_DIR / "model.lgb"  # from_artifacts resolves .onnx/.lgb in order
-MEDIANS_PATH = MODELS_DIR / "train_medians.npy"
-BIASES_PATH = MODELS_DIR / "threshold_biases.npy"
+MODEL_PATH = ARTIFACTS_DIR / "model.lgb"  # from_artifacts resolves .onnx/.lgb in order
+MEDIANS_PATH = ARTIFACTS_DIR / "train_medians.npy"
+BIASES_PATH = ARTIFACTS_DIR / "threshold_biases.npy"
 FEATURE_CACHE_TRAIN = CACHE_DIR / "cache_train_features.parquet"
 FEATURE_CACHE_TEST = CACHE_DIR / "cache_test_features.parquet"
 

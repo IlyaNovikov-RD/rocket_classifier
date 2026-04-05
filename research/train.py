@@ -6,7 +6,7 @@ LightGBM + Optuna + Salvo Consensus
 Result
 ------
 OOB min_class_recall = 1.000000
-Biases: saved to models/threshold_biases.npy
+Biases: saved to artifacts/threshold_biases.npy
 Training report: training_report.json (project root — git-tracked provenance)
 
 Problem
@@ -103,16 +103,16 @@ Usage
 Local (run from project root):
     Place train.csv in the project root. Optionally place
     cache_train_features.parquet in cache/ to skip feature engineering.
-    Outputs land in cache/ and models/ (mirrors production structure).
+    Outputs land in cache/ and artifacts/ (mirrors production structure).
 
     python research/train.py
 
 Google Colab:
     Upload train.csv (and optionally cache/cache_train_features.parquet)
-    to /content/. Outputs land in /content/cache/ and /content/models/.
+    to /content/. Outputs land in /content/cache/ and /content/artifacts/.
 
 Environment is auto-detected (Colab: /content/, local: current directory).
-cache/ and models/ subdirectories are created automatically.
+cache/ and artifacts/ subdirectories are created automatically.
 
 Dependencies:
     pip install lightgbm optuna scikit-learn pandas numpy pyarrow
@@ -171,13 +171,13 @@ log = logging.getLogger("train")
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 # Project root — works identically locally and on Colab (clone the repo,
-# data lives in data/, artifacts in cache/ and models/).
+# data lives in data/, artifacts in cache/ and artifacts/).
 ROOT = Path(".")
 TRAIN_CSV = ROOT / "data" / "train.csv"
 CACHE_DIR = ROOT / "cache"
-MODELS_DIR = ROOT / "models"
+ARTIFACTS_DIR = ROOT / "artifacts"
 CACHE_DIR.mkdir(exist_ok=True)
-MODELS_DIR.mkdir(exist_ok=True)
+ARTIFACTS_DIR.mkdir(exist_ok=True)
 FEATURE_CACHE = CACHE_DIR / "cache_train_features.parquet"
 
 N_CLASSES = 3
@@ -825,9 +825,9 @@ log.info("Trained on full dataset. Trees: %d", final_model.booster_.num_trees())
 
 # ── Save artifacts ─────────────────────────────────────────────────────────────
 
-final_model.booster_.save_model(str(MODELS_DIR / "model.lgb"))
-np.save(str(MODELS_DIR / "train_medians.npy"), train_medians)
-np.save(str(MODELS_DIR / "threshold_biases.npy"), biases)  # [0.0, b1, b2] — class-0 is reference
+final_model.booster_.save_model(str(ARTIFACTS_DIR / "model.lgb"))
+np.save(str(ARTIFACTS_DIR / "train_medians.npy"), train_medians)
+np.save(str(ARTIFACTS_DIR / "threshold_biases.npy"), biases)  # [0.0, b1, b2] — class-0 is reference
 
 results = {
     "oob_score_before_consensus": float(score_raw),
@@ -847,7 +847,7 @@ with open(ROOT / "training_report.json", "w") as f:
     json.dump(results, f, indent=2)
 
 log.info("")
-log.info("Models saved to %s", MODELS_DIR)
+log.info("Artifacts saved to %s", ARTIFACTS_DIR)
 log.info("  model.lgb          — production LightGBM model")
 log.info("  train_medians.npy  — NaN imputation medians (32 values)")
 log.info("  threshold_biases.npy — log-probability biases %s", biases.tolist())

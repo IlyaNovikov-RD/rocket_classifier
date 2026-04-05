@@ -27,7 +27,7 @@ jobs:
           assert len(SELECTED_FEATURES) == 32
           assert PRODUCTION_BIASES.shape == (3,)
           # Verify model artifacts were downloaded during build
-          models = Path('/app/models')
+          models = Path('/app/artifacts')
           assert (models / 'model.lgb').exists(), 'model.lgb not found'
           assert (models / 'train_medians.npy').exists(), 'train_medians.npy not found'
           print('Model package imports OK')

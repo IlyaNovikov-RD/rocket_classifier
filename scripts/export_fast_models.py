@@ -4,7 +4,7 @@
 Run once after downloading new models (or use: make export-model):
     uv run python export_fast_models.py
 
-Exports to models/:
+Exports to artifacts/:
     model.lgb   — native LightGBM text format (no sklearn overhead)
     model.onnx  — ONNX format (fastest inference, 2.6x over sklearn)
 
@@ -25,7 +25,7 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 
-WEIGHTS_DIR = Path(__file__).parent.parent / "models"
+ARTIFACTS_DIR = Path(__file__).parent.parent / "artifacts"
 
 
 def _load_booster() -> object:
@@ -33,7 +33,7 @@ def _load_booster() -> object:
 
     Returns the LightGBM Booster object.
     """
-    lgb_path = WEIGHTS_DIR / "model.lgb"
+    lgb_path = ARTIFACTS_DIR / "model.lgb"
 
     if lgb_path.exists():
         booster = lgb.Booster(model_file=str(lgb_path))
@@ -43,7 +43,7 @@ def _load_booster() -> object:
         return booster
 
     print(
-        "ERROR: model.lgb not found in models/.\nRun: make download-models",
+        "ERROR: model.lgb not found in artifacts/.\nRun: make download-models",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -51,7 +51,7 @@ def _load_booster() -> object:
 
 def export_native_lgbm(booster: object) -> Path:
     """Save to native LightGBM text format — no sklearn overhead on load."""
-    out = WEIGHTS_DIR / "model.lgb"
+    out = ARTIFACTS_DIR / "model.lgb"
     booster.save_model(str(out))  # type: ignore[union-attr]
     size_mb = out.stat().st_size / 1_048_576
     print(f"  Saved model.lgb  ({size_mb:.1f} MB)")
@@ -76,7 +76,7 @@ def export_onnx(booster: object) -> Path | None:
     onnx_model = onnxmltools.convert_lightgbm(
         booster, initial_types=initial_type, target_opset=15, zipmap=False
     )
-    out = WEIGHTS_DIR / "model.onnx"
+    out = ARTIFACTS_DIR / "model.onnx"
     onnx.save(onnx_model, str(out))
     size_mb = out.stat().st_size / 1_048_576
     print(f"  Saved model.onnx ({size_mb:.1f} MB)")
@@ -90,7 +90,7 @@ def export_onnx(booster: object) -> Path | None:
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         so.enable_mem_pattern = True
         so.enable_cpu_mem_arena = True
-        opt_out = WEIGHTS_DIR / "model_opt.onnx"
+        opt_out = ARTIFACTS_DIR / "model_opt.onnx"
         so.optimized_model_filepath = str(opt_out)
         ort.InferenceSession(str(out), sess_options=so, providers=["CPUExecutionProvider"])
         size_mb_opt = opt_out.stat().st_size / 1_048_576
@@ -107,7 +107,7 @@ def _load_test_features() -> np.ndarray | None:
     Returns an (N, 35) array matching the model's expected input, or None.
     """
     cache = Path(__file__).parent.parent / "cache" / "cache_test_features.parquet"
-    medians_path = WEIGHTS_DIR / "train_medians.npy"
+    medians_path = ARTIFACTS_DIR / "train_medians.npy"
     if not cache.exists() or not medians_path.exists():
         return None
     try:
@@ -137,7 +137,7 @@ def benchmark(booster: object, X: np.ndarray) -> None:
     RUNS = 10
 
     # Backend 1: native LightGBM booster (baseline)
-    lgb_path = WEIGHTS_DIR / "model.lgb"
+    lgb_path = ARTIFACTS_DIR / "model.lgb"
     p_native = None
     t_lgb = None
     if lgb_path.exists():
@@ -151,7 +151,7 @@ def benchmark(booster: object, X: np.ndarray) -> None:
         print(f"  native LightGBM   : {t_lgb:.3f}s  (baseline)")
 
     # Backend 2: ONNX Runtime
-    onnx_path = WEIGHTS_DIR / "model.onnx"
+    onnx_path = ARTIFACTS_DIR / "model.onnx"
     if onnx_path.exists():
         try:
             import onnxruntime as ort
@@ -176,7 +176,7 @@ def benchmark(booster: object, X: np.ndarray) -> None:
                 )
             else:
                 print(f"  ONNX Runtime      : {t_onnx:.3f}s  <- production default")
-            biases = np.load(str(WEIGHTS_DIR / "threshold_biases.npy"))
+            biases = np.load(str(ARTIFACTS_DIR / "threshold_biases.npy"))
             if p_native is not None:
                 preds_ref = np.argmax(np.log(p_native + 1e-12) + biases, axis=1)
                 preds_on = np.argmax(np.log(p_onnx + 1e-12) + biases, axis=1)

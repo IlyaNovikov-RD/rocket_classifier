@@ -168,8 +168,8 @@ class RocketClassifier:
     Usage::
 
         clf = RocketClassifier.from_artifacts(
-            model_path="models/model.lgb",
-            medians_path="models/train_medians.npy",
+            model_path="artifacts/model.lgb",
+            medians_path="artifacts/train_medians.npy",
         )
         preds = clf.predict(feature_df)
     """

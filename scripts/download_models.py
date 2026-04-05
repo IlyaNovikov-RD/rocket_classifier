@@ -2,7 +2,7 @@
 """Download production model artifacts from GitHub Release.
 
 Downloads model.onnx, model.lgb, train_medians.npy, and
-threshold_biases.npy from the latest GitHub Release into models/.
+threshold_biases.npy from the latest GitHub Release into artifacts/.
 Required before running the inference pipeline
 (``python -m rocket_classifier.main``).
 
@@ -48,15 +48,15 @@ DATA_ARTIFACTS = [
 ]
 
 ROOT = Path(__file__).parent.parent
-WEIGHTS_DIR = ROOT / "models"
+ARTIFACTS_DIR = ROOT / "artifacts"
 CACHE_DIR = ROOT / "cache"
 DATA_DIR = ROOT / "data"
-WEIGHTS_DIR.mkdir(exist_ok=True)
+ARTIFACTS_DIR.mkdir(exist_ok=True)
 CACHE_DIR.mkdir(exist_ok=True)
 
 
 def main(include_caches: bool = False) -> None:
-    """Download model artifacts from GitHub Release into models/ and cache/.
+    """Download model artifacts from GitHub Release into artifacts/ and cache/.
 
     Args:
         include_caches: If True, also downloads parquet feature caches (~15 MB)
@@ -71,7 +71,7 @@ def main(include_caches: bool = False) -> None:
             DATA_DIR.mkdir(exist_ok=True)
             dest = DATA_DIR / name
         else:
-            dest = WEIGHTS_DIR / name
+            dest = ARTIFACTS_DIR / name
         if dest.exists():
             print(f"  {name} — already exists, skipping")
             continue
@@ -86,7 +86,7 @@ def main(include_caches: bool = False) -> None:
             sys.exit(1)
 
     for name in OPTIONAL_ARTIFACTS:
-        dest = WEIGHTS_DIR / name
+        dest = ARTIFACTS_DIR / name
         if dest.exists():
             print(f"  {name} — already exists, skipping")
             continue
