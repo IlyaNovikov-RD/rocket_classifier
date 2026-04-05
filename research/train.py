@@ -171,7 +171,7 @@ log = logging.getLogger("train")
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 # Project root — works identically locally and on Colab (clone the repo,
-# data lives in data/, artifacts in cache/ and artifacts/).
+# data/ has raw CSVs, cache/ has feature parquets, artifacts/ has model files).
 ROOT = Path(".")
 TRAIN_CSV = ROOT / "data" / "train.csv"
 CACHE_DIR = ROOT / "cache"
