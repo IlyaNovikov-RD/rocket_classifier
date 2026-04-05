@@ -15,6 +15,7 @@ make download-all     # + feature caches into cache/ + test.csv/sample_submissio
 make run              # inference pipeline → output/submission.csv
 make pipeline         # download-all + run + interpret (full end-to-end)
 make demo             # launch Streamlit app (localhost:8501)
+make train            # full training pipeline (Optuna + consensus → artifacts/)
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 make export-model     # convert model.lgb → model.onnx + model_opt.onnx (required before release; requires onnxmltools)
