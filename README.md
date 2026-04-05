@@ -358,7 +358,7 @@ make run             # → outputs/submission.csv
 make interpret       # → assets/shap_summary.png
 make visualize       # → assets/demo.png
 
-# After a model update — regenerate ONNX (requires: uv pip install onnxmltools skl2onnx)
+# After a model update — regenerate ONNX (requires: uv pip install onnxmltools)
 make export-model
 
 make demo            # streamlit demo (localhost:8501)

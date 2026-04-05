@@ -851,7 +851,6 @@ dev = [
     { name = "onnxmltools" },
     { name = "pytest" },
     { name = "ruff" },
-    { name = "skl2onnx" },
 ]
 research = [
     { name = "matplotlib" },
@@ -879,7 +878,6 @@ dev = [
     { name = "onnxmltools", specifier = ">=1.10" },
     { name = "pytest", specifier = ">=9.0.2,<10.0.0" },
     { name = "ruff", specifier = ">=0.15.7,<0.16.0" },
-    { name = "skl2onnx", specifier = ">=1.13" },
 ]
 research = [
     { name = "matplotlib", specifier = ">=3.7" },
