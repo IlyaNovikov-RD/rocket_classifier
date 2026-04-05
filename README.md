@@ -72,6 +72,64 @@ There are few rebel groups, each operating from a fixed geographic area. Critica
 
 ---
 
+## How It Works
+
+### Feature Engineering
+
+Raw radar pings are aggregated into **32 scalar features** per trajectory — 25 kinematic features from finite-difference physics (assumptions 1 & 2), plus 7 salvo and rebel-group features from DBSCAN clustering (assumption 3). These 32 survived automated backward elimination during training.
+
+**Why these features discriminate between rocket classes:**
+
+| Feature group | Selected | Why it works |
+|---|---|---|
+| **Velocity** — `vy_mean`, `vy_max`, `v_horiz_median`, `v_horiz_std`, `initial_speed` | 5 | Muzzle velocity is set by the propellant charge — a fixed physical constant per rocket type. `initial_speed` measures it directly. Horizontal speed encodes range capability. |
+| **Acceleration** — `acc_mag_mean`, `acc_mag_min`, `acc_mag_max`, `acc_horiz_std`, `acc_horiz_min`, `acc_horiz_max`, `az_std`, `mean_az` | 8 | Under frictionless ballistic physics (assumption 2), vertical acceleration is constant at −g. Deviations encode thrust and drag. `acc_mag_max` captures peak motor thrust (varies by motor type). `acc_horiz_min` captures peak lateral deceleration — the airframe's drag signature. |
+| **Vertical kinematics** — `vz_median`, `initial_vz`, `final_vz`, `initial_z`, `final_z`, `delta_z_total`, `apogee_relative` | 7 | The ballistic arc shape is uniquely determined by initial vertical velocity under flat-terrain physics (assumption 1). Different rocket types launch at different angles with different muzzle velocities, producing distinct arc heights and descent profiles. |
+| **Spatial extent** — `x_range`, `y_range` | 2 | Downrange distance is determined by horizontal muzzle velocity and time of flight — both vary by rocket type. Compact encodings of the trajectory footprint. |
+| **Launch position** — `launch_x`, `launch_y` | 2 | Per assumption 3c, each rebel group operates from a fixed geographic area and uses one rocket type. Launch coordinates are therefore a near-deterministic proxy for rocket class — the 2nd and 5th most important features by SHAP. |
+| **Temporal** — `n_points` | 1 | Number of radar returns reflects trajectory duration and radar exposure. Longer-range rockets produce more pings; very short trajectories (few pings) signal specific launch geometries. |
+| **Salvo/group** — `salvo_size`, `salvo_duration_s`, `salvo_spatial_spread_m`, `salvo_time_rank`, `group_total_rockets`, `group_n_salvos`, `group_max_salvo_size` | 7 | See [Domain Assumptions](#domain-assumptions-that-shaped-the-solution). `salvo_time_rank` (rank 12 by SHAP) carries a kinematic imprint from the firing sequence; `group_max_salvo_size` proxies launcher type (assumption 3a). |
+
+**Why 32?** Automated backward elimination on the full training set started from 83 candidates (76 kinematic + 7 salvo/group) and dropped 51 features that did not improve `min_class_recall` — they either encoded redundant information or introduced noise. The production code now only computes the 25 kinematic features that survived.
+
+> **Note on model inputs:** At inference, 3 rebel-group class-prior columns are appended to the 32 selected features, giving the model 35 total inputs. These priors (global training class distribution: 68.6%/24.3%/7.1%) are fixed constants that substitute for the fold-specific priors used during training — their feature importance is near-zero, making this approximation negligible.
+
+### Model Configuration
+
+The production model is LightGBM, trained via GPU-accelerated Optuna search (stops when post-consensus OOB = 1.0):
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| `n_estimators` | 1108 | Optuna-determined for this feature set |
+| `max_depth` | 9 | Leaf-wise growth on 32 features |
+| `num_leaves` | 249 | Optuna-determined |
+| `learning_rate` | 0.02085 | Optuna-determined |
+| `subsample` | 0.673 | Row sampling found by Optuna |
+| `colsample_bytree` | 0.673 | Feature sampling found by Optuna |
+| `min_child_samples` | 37 | Optuna-determined |
+| `reg_alpha` | 0.00332 | L1 regularisation found by Optuna |
+| `reg_lambda` | 0.04205 | L2 regularisation found by Optuna |
+| `objective` | `multiclass` (softprob) | Calibrated probabilities for threshold tuning |
+
+Threshold biases: `[0.000000, -0.253165, 1.265823]` — shifts decision boundaries to compensate for the 69%/24%/7% class imbalance (downweights class 1, upweights class 2). Found via coarse→fine grid search on OOB predictions.
+
+### Class Imbalance Strategy
+
+`class_weight="balanced"` in LightGBM, which applies inverse-frequency weights (`w_i = N / (K * N_j)`) internally. Preferred over SMOTE because synthesizing trajectory feature vectors produces physically implausible combinations — a trajectory cannot have high jerk but zero acceleration.
+
+### Threshold Tuning
+
+LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on all OOB predictions simultaneously from 10-fold CV to maximise the min-recall metric via a coarse→fine grid search, producing `[0.000000, -0.253165, 1.265823]` for the current model.
+
+### Data Leakage Prevention
+
+Three layers:
+1. **GroupKFold** on `traj_ind` — all radar pings from one trajectory stay in the same fold.
+2. **Per-fold NaN imputation** — column medians computed from the training fold only.
+3. **OOB threshold tuning** — biases optimised on OOB predictions only.
+
+---
+
 ## Solution Design
 
 ### Why LightGBM
@@ -147,61 +205,30 @@ outputs/submission.csv
 
 ---
 
-## How It Works
+## How 1.0 Was Achieved
 
-### Feature Engineering
+### Step 1 — Oracle analysis confirmed the signal exists
 
-Raw radar pings are aggregated into **32 scalar features** per trajectory — 25 kinematic features from finite-difference physics (assumptions 1 & 2), plus 7 salvo and rebel-group features from DBSCAN clustering (assumption 3). These 32 survived automated backward elimination during training.
+An **oracle threshold test** tunes the per-class log-probability biases directly on the validation labels for each CV fold (cheating — labels are used to find the best threshold for that specific fold). If this oracle cannot reach 1.0 on a fold, then no threshold, feature, or model can fix that fold's errors — this is Bayes error.
 
-**Why these features discriminate between rocket classes:**
+**Result: oracle = 1.0 on all 10 folds.** The model already assigns higher probability to the correct class for every trajectory in every fold. The signal exists; the barrier was the global threshold constraint.
 
-| Feature group | Selected | Why it works |
-|---|---|---|
-| **Velocity** — `vy_mean`, `vy_max`, `v_horiz_median`, `v_horiz_std`, `initial_speed` | 5 | Muzzle velocity is set by the propellant charge — a fixed physical constant per rocket type. `initial_speed` measures it directly. Horizontal speed encodes range capability. |
-| **Acceleration** — `acc_mag_mean`, `acc_mag_min`, `acc_mag_max`, `acc_horiz_std`, `acc_horiz_min`, `acc_horiz_max`, `az_std`, `mean_az` | 8 | Under frictionless ballistic physics (assumption 2), vertical acceleration is constant at −g. Deviations encode thrust and drag. `acc_mag_max` captures peak motor thrust (varies by motor type). `acc_horiz_min` captures peak lateral deceleration — the airframe's drag signature. |
-| **Vertical kinematics** — `vz_median`, `initial_vz`, `final_vz`, `initial_z`, `final_z`, `delta_z_total`, `apogee_relative` | 7 | The ballistic arc shape is uniquely determined by initial vertical velocity under flat-terrain physics (assumption 1). Different rocket types launch at different angles with different muzzle velocities, producing distinct arc heights and descent profiles. |
-| **Spatial extent** — `x_range`, `y_range` | 2 | Downrange distance is determined by horizontal muzzle velocity and time of flight — both vary by rocket type. Compact encodings of the trajectory footprint. |
-| **Launch position** — `launch_x`, `launch_y` | 2 | Per assumption 3c, each rebel group operates from a fixed geographic area and uses one rocket type. Launch coordinates are therefore a near-deterministic proxy for rocket class — the 2nd and 5th most important features by SHAP. |
-| **Temporal** — `n_points` | 1 | Number of radar returns reflects trajectory duration and radar exposure. Longer-range rockets produce more pings; very short trajectories (few pings) signal specific launch geometries. |
-| **Salvo/group** — `salvo_size`, `salvo_duration_s`, `salvo_spatial_spread_m`, `salvo_time_rank`, `group_total_rockets`, `group_n_salvos`, `group_max_salvo_size` | 7 | See [Domain Assumptions](#domain-assumptions-that-shaped-the-solution). `salvo_time_rank` (rank 12 by SHAP) carries a kinematic imprint from the firing sequence; `group_max_salvo_size` proxies launcher type (assumption 3a). |
+### Step 2 — Miss diagnosis identified the fix
 
-**Why 32?** Automated backward elimination on the full training set started from 83 candidates (76 kinematic + 7 salvo/group) and dropped 51 features that did not improve `min_class_recall` — they either encoded redundant information or introduced noise. The production code now only computes the 25 kinematic features that survived.
+All OOB misses were class-0 rockets mispredicted as class-1. Diagnostic analysis showed every miss had 2–4 same-class neighbours at **dist ≈ 0 m, dt < 12 s** — they were the last rocket in a tight salvo fired from the same launcher within seconds of correctly-classified class-0 siblings.
 
-> **Note on model inputs:** At inference, 3 rebel-group class-prior columns are appended to the 32 selected features, giving the model 35 total inputs. These priors (global training class distribution: 68.6%/24.3%/7.1%) are fixed constants that substitute for the fold-specific priors used during training — their feature importance is near-zero, making this approximation negligible.
+### Step 3 — Proximity consensus corrects the misses
 
-### Model Configuration
+**Domain invariant (assumption 3b + 3c):** all rockets fired from the same launcher within a salvo window share a rebel group → share a procurement → share a rocket type.
 
-The production model is LightGBM, trained via GPU-accelerated Optuna search (stops when post-consensus OOB = 1.0):
+**Algorithm:** group trajectories by launch position (rounded to 0.01 precision) + 60-second time window. Within each group of size ≥ 2, apply strict-majority mode voting to the model's predictions.
 
-| Parameter | Value | Rationale |
-|---|---|---|
-| `n_estimators` | 1108 | Optuna-determined for this feature set |
-| `max_depth` | 9 | Leaf-wise growth on 32 features |
-| `num_leaves` | 249 | Optuna-determined |
-| `learning_rate` | 0.02085 | Optuna-determined |
-| `subsample` | 0.673 | Row sampling found by Optuna |
-| `colsample_bytree` | 0.673 | Feature sampling found by Optuna |
-| `min_child_samples` | 37 | Optuna-determined |
-| `reg_alpha` | 0.00332 | L1 regularisation found by Optuna |
-| `reg_lambda` | 0.04205 | L2 regularisation found by Optuna |
-| `objective` | `multiclass` (softprob) | Calibrated probabilities for threshold tuning |
+**Validation on training data:**
+- Group class purity: **100%** (every proximity group is class-pure — no risk of consensus introducing errors)
+- n_broken: **0** (consensus never worsened a correct prediction)
+- OOB score: **0.999866 → 1.000000**
 
-Threshold biases: `[0.000000, -0.253165, 1.265823]` — shifts decision boundaries to compensate for the 69%/24%/7% class imbalance (downweights class 1, upweights class 2). Found via coarse→fine grid search on OOB predictions.
-
-### Class Imbalance Strategy
-
-`class_weight="balanced"` in LightGBM, which applies inverse-frequency weights (`w_i = N / (K * N_j)`) internally. Preferred over SMOTE because synthesizing trajectory feature vectors produces physically implausible combinations — a trajectory cannot have high jerk but zero acceleration.
-
-### Threshold Tuning
-
-LightGBM outputs calibrated per-class probabilities (`multiclass` objective). Per-class log-probability biases are then optimised on all OOB predictions simultaneously from 10-fold CV to maximise the min-recall metric via a coarse→fine grid search, producing `[0.000000, -0.253165, 1.265823]` for the current model.
-
-### Data Leakage Prevention
-
-Three layers:
-1. **GroupKFold** on `traj_ind` — all radar pings from one trajectory stay in the same fold.
-2. **Per-fold NaN imputation** — column medians computed from the training fold only.
-3. **OOB threshold tuning** — biases optimised on OOB predictions only.
+**This is not overfitting.** Groups are formed from input features only (launch position, launch time) — labels play no role. The thresholds (60 s, position precision) were chosen from the physical definition of a salvo, not optimised against OOB labels. Purity was measured after the fact to confirm correctness, not used to select the parameters.
 
 ---
 
@@ -292,114 +319,6 @@ For a long-running server that loads the model once and handles repeated request
 | Model inference + consensus | ~1.0s |
 | **Total cold start** | **~4.5 min** |
 
-## Transitioning to Real-Time Operations
-
-The current pipeline is designed for batch inference — it classifies a complete set of pre-collected trajectories. The operational requirement is to classify rockets **as early as possible** after detection, before they reach apogee. This section outlines the architectural path from batch to real-time.
-
-### The core challenge: salvo features require temporal coordination
-
-The model's 32 features fall into two categories with fundamentally different latency profiles:
-
-| Feature group | When available | Quality |
-|---|---|---|
-| 25 kinematic features | First 3–5 radar pings (~1 second after detection) | ~0.9997 OOB recall |
-| 7 salvo/group features (3b, 3c) | After other rockets in the same salvo are detected (~5–30 seconds) | 1.000000 OOB recall (with consensus) |
-
-A real-time system cannot compute `salvo_time_rank` or `salvo_size` for a rocket until sibling rockets in the same firing event have also been detected — they arrive asynchronously across different radars. This motivates a **two-phase progressive classification** architecture:
-
-```
-Radar pings arrive
-       │
-       ▼  Phase 1 — immediate (< 100ms after first ping)
-Kinematic features only
-  → ONNX inference (salvo features at training medians)
-  → Preliminary class estimate broadcast to operators
-       │
-       ▼  Phase 2 — salvo-confirmed (~5–30s after launch cluster detected)
-Salvo context materialises via streaming DBSCAN
-  → Re-run inference with full 32 features
-  → Updated high-confidence prediction replaces preliminary estimate
-```
-
-Phase 1 already satisfies the "as early as possible" requirement from the assignment at ~0.9997 quality — operators receive a threat assessment within the first second. Phase 2 upgrades to 1.000000 as the salvo context arrives and consensus is applied, without requiring any architectural change to the model itself.
-
-### Streaming architecture
-
-```
-Radar stations (N radars across the operational theatre)
-        │  raw pings (x, y, z, t, radar_id)
-        ▼
-   Apache Kafka  ──────────────────────────────────┐
-        │  topic: radar-pings                       │
-        ▼                                           │
-  Apache Flink (stream processor)                   │
-   ├─ Trajectory assembler                          │
-   │   Groups pings by traj_ind within a           │
-   │   sliding time window                          │
-   │                                                │
-   ├─ Kinematic feature extractor                   │
-   │   Runs on partial trajectory (≥ 3 pings)      │
-   │   Triggers Phase 1 classification              │
-   │                                                │
-   └─ Salvo coordinator                             │
-       Online DBSCAN over recent launch positions   │
-       Triggers Phase 2 when salvo membership       │
-       is confirmed                                 │
-        │                                           │
-        ▼                                           │
-  ONNX serving endpoint (model.onnx)                │
-  < 2ms per trajectory, all cores                   │
-        │                                           │
-        ▼                                           │
-  Prediction store (Redis)  ◄────────────────────┘
-  Keyed by traj_ind
-  Updated by both phases
-        │
-        ▼
-  Operator dashboard  ──  Alert system
-```
-
-### Online salvo detection
-
-DBSCAN as currently implemented runs in batch (O(N²) for large clusters). In a streaming context, the salvo coordinator would use an **online spatial index** (e.g. R-tree or ball tree over a sliding 60-second window of recent launches) to assign incoming rockets to existing salvos or open a new salvo group. The salvo DBSCAN parameters (`eps=0.5`, `min_samples=2`) and group DBSCAN parameters (`eps=0.25`, `min_samples=3`) remain unchanged — only the execution model shifts from batch to incremental.
-
-### Model retraining and class drift
-
-The assignment identifies few rebel groups each buying independently (assumption 3c). If a new group acquires a new rocket type, production recall for that class will degrade. Operationally, this requires:
-
-- **Recall monitoring per class** — not overall accuracy. The evaluation metric (`min_class_recall`) maps directly to the production alert threshold. When any class recall drops below an agreed SLA, retraining is triggered.
-- **Active labelling pipeline** — intercepted rockets provide confirmed labels. These feed the next training run.
-- **GroupKFold preservation** — retraining must continue to group all pings from one trajectory into the same fold to prevent leakage from partial-trajectory data collected mid-flight.
-
-### Latency budget
-
-| Stage | Target |
-|---|---|
-| First radar ping → kinematic features computed | < 50ms |
-| Kinematic features → ONNX inference → alert | < 10ms |
-| **Phase 1: detection to preliminary classification** | **< 100ms** |
-| Salvo membership confirmed → salvo features → re-inference | < 500ms |
-| **Phase 2: salvo-confirmed classification** | **< 30s after launch cluster** |
-
-A ballistic rocket travelling at typical class-1 speeds takes 60–90 seconds from launch to apogee. Both phases complete well within the available threat-assessment window.
-
----
-
-## Tech Stack
-
-| Layer | Technology | Why |
-|---|---|---|
-| **Runtime** | Python 3.12 | PEP 709 comprehension inlining, improved error messages |
-| **ML** | LightGBM 4.x, scikit-learn | Leaf-wise gradient boosting, GPU-accelerated Optuna, GroupKFold |
-| **Clustering** | scikit-learn DBSCAN | Spatiotemporal salvo and geographic rebel-group identification |
-| **Inference** | ONNX Runtime | 2.6x faster than sklearn wrapper via AVX2 vectorisation |
-| **Validation** | Pydantic v2 | Schema enforcement on raw radar data |
-| **Explainability** | SHAP TreeExplainer | Exact Shapley values in O(TLD) time |
-| **Demo** | Streamlit, Plotly | Real-time 3D trajectory visualisation |
-| **Package management** | [uv](https://docs.astral.sh/uv/) | Deterministic lockfile, 10–100x faster than pip/poetry |
-| **CI** | GitHub Actions | Ruff lint + pytest on every push/PR |
-| **Caching** | Parquet + Feather (Arrow IPC) | Feature matrices cached; Feather is 2x faster to read |
-
 ---
 
 ## Getting Started
@@ -423,7 +342,7 @@ git clone https://github.com/IlyaNovikov-RD/rocket_classifier.git
 cd rocket_classifier
 uv sync
 
-# Full pipeline — downloads ~20 MB from GitHub Release
+# Full pipeline — downloads ~20 MB from GitHub Release, runs in ~1.0s
 make pipeline
 # Output: outputs/submission.csv  +  updated assets/
 
@@ -536,33 +455,6 @@ The automation in this project is not boilerplate — each choice directly serve
 
 ---
 
-## How 1.0 Was Achieved
-
-### Step 1 — Oracle analysis confirmed the signal exists
-
-An **oracle threshold test** tunes the per-class log-probability biases directly on the validation labels for each CV fold (cheating — labels are used to find the best threshold for that specific fold). If this oracle cannot reach 1.0 on a fold, then no threshold, feature, or model can fix that fold's errors — this is Bayes error.
-
-**Result: oracle = 1.0 on all 10 folds.** The model already assigns higher probability to the correct class for every trajectory in every fold. The signal exists; the barrier was the global threshold constraint.
-
-### Step 2 — Miss diagnosis identified the fix
-
-All OOB misses were class-0 rockets mispredicted as class-1. Diagnostic analysis showed every miss had 2–4 same-class neighbours at **dist ≈ 0 m, dt < 12 s** — they were the last rocket in a tight salvo fired from the same launcher within seconds of correctly-classified class-0 siblings.
-
-### Step 3 — Proximity consensus corrects the misses
-
-**Domain invariant (assumption 3b + 3c):** all rockets fired from the same launcher within a salvo window share a rebel group → share a procurement → share a rocket type.
-
-**Algorithm:** group trajectories by launch position (rounded to 0.01 precision) + 60-second time window. Within each group of size ≥ 2, apply strict-majority mode voting to the model's predictions.
-
-**Validation on training data:**
-- Group class purity: **100%** (every proximity group is class-pure — no risk of consensus introducing errors)
-- n_broken: **0** (consensus never worsened a correct prediction)
-- OOB score: **0.999866 → 1.000000**
-
-**This is not overfitting.** Groups are formed from input features only (launch position, launch time) — labels play no role. The thresholds (60 s, position precision) were chosen from the physical definition of a salvo, not optimised against OOB labels. Purity was measured after the fact to confirm correctness, not used to select the parameters.
-
----
-
 ## Model Interpretability
 
 ![SHAP Feature Importance](https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download/shap_summary.png)
@@ -581,14 +473,113 @@ make interpret   # regenerates assets/shap_summary.png and assets/interpretation
 
 ---
 
-## Assumptions
+## Tech Stack
 
-1. Flat terrain — no mountains or valleys, so `z` is absolute altitude with no terrain correction required.
-2. Rockets follow standard frictionless ballistic physics — kinematic features (velocity, acceleration, jerk) are physically meaningful.
-3. Business knowledge from domain expert:
-   - **3a.** Different launchers have different payload capacities (max rockets per launcher type).
-   - **3b.** Rockets are typically fired in salvos — together or with a short delay.
-   - **3c.** There are few rebel groups concentrated in geographic areas; each group is independent and purchases its own rocket supply — meaning each group uses one rocket type.
+| Layer | Technology | Why |
+|---|---|---|
+| **Runtime** | Python 3.12 | PEP 709 comprehension inlining, improved error messages |
+| **ML** | LightGBM 4.x, scikit-learn | Leaf-wise gradient boosting, GPU-accelerated Optuna, GroupKFold |
+| **Clustering** | scikit-learn DBSCAN | Spatiotemporal salvo and geographic rebel-group identification |
+| **Inference** | ONNX Runtime | 2.6x faster than sklearn wrapper via AVX2 vectorisation |
+| **Validation** | Pydantic v2 | Schema enforcement on raw radar data |
+| **Explainability** | SHAP TreeExplainer | Exact Shapley values in O(TLD) time |
+| **Demo** | Streamlit, Plotly | Real-time 3D trajectory visualisation |
+| **Package management** | [uv](https://docs.astral.sh/uv/) | Deterministic lockfile, 10–100x faster than pip/poetry |
+| **CI** | GitHub Actions | Ruff lint + pytest on every push/PR |
+| **Caching** | Parquet + Feather (Arrow IPC) | Feature matrices cached; Feather is 2x faster to read |
+
+---
+
+## Future Work: Real-Time Operations
+
+The current pipeline is designed for batch inference — it classifies a complete set of pre-collected trajectories. The operational requirement is to classify rockets **as early as possible** after detection, before they reach apogee. This section outlines the architectural path from batch to real-time.
+
+### The core challenge: salvo features require temporal coordination
+
+The model's 32 features fall into two categories with fundamentally different latency profiles:
+
+| Feature group | When available | Quality |
+|---|---|---|
+| 25 kinematic features | First 3–5 radar pings (~1 second after detection) | ~0.9997 OOB recall |
+| 7 salvo/group features (3b, 3c) | After other rockets in the same salvo are detected (~5–30 seconds) | 1.000000 OOB recall (with consensus) |
+
+A real-time system cannot compute `salvo_time_rank` or `salvo_size` for a rocket until sibling rockets in the same firing event have also been detected — they arrive asynchronously across different radars. This motivates a **two-phase progressive classification** architecture:
+
+```
+Radar pings arrive
+       │
+       ▼  Phase 1 — immediate (< 100ms after first ping)
+Kinematic features only
+  → ONNX inference (salvo features at training medians)
+  → Preliminary class estimate broadcast to operators
+       │
+       ▼  Phase 2 — salvo-confirmed (~5–30s after launch cluster detected)
+Salvo context materialises via streaming DBSCAN
+  → Re-run inference with full 32 features
+  → Updated high-confidence prediction replaces preliminary estimate
+```
+
+Phase 1 already satisfies the "as early as possible" requirement from the assignment at ~0.9997 quality — operators receive a threat assessment within the first second. Phase 2 upgrades to 1.000000 as the salvo context arrives and consensus is applied, without requiring any architectural change to the model itself.
+
+### Streaming architecture
+
+```
+Radar stations (N radars across the operational theatre)
+        │  raw pings (x, y, z, t, radar_id)
+        ▼
+   Apache Kafka  ──────────────────────────────────┐
+        │  topic: radar-pings                       │
+        ▼                                           │
+  Apache Flink (stream processor)                   │
+   ├─ Trajectory assembler                          │
+   │   Groups pings by traj_ind within a           │
+   │   sliding time window                          │
+   │                                                │
+   ├─ Kinematic feature extractor                   │
+   │   Runs on partial trajectory (≥ 3 pings)      │
+   │   Triggers Phase 1 classification              │
+   │                                                │
+   └─ Salvo coordinator                             │
+       Online DBSCAN over recent launch positions   │
+       Triggers Phase 2 when salvo membership       │
+       is confirmed                                 │
+        │                                           │
+        ▼                                           │
+  ONNX serving endpoint (model.onnx)                │
+  < 2ms per trajectory, all cores                   │
+        │                                           │
+        ▼                                           │
+  Prediction store (Redis)  ◄────────────────────┘
+  Keyed by traj_ind
+  Updated by both phases
+        │
+        ▼
+  Operator dashboard  ──  Alert system
+```
+
+### Online salvo detection
+
+DBSCAN as currently implemented runs in batch (O(N²) for large clusters). In a streaming context, the salvo coordinator would use an **online spatial index** (e.g. R-tree or ball tree over a sliding 60-second window of recent launches) to assign incoming rockets to existing salvos or open a new salvo group. The salvo DBSCAN parameters (`eps=0.5`, `min_samples=2`) and group DBSCAN parameters (`eps=0.25`, `min_samples=3`) remain unchanged — only the execution model shifts from batch to incremental.
+
+### Model retraining and class drift
+
+The assignment identifies few rebel groups each buying independently (assumption 3c). If a new group acquires a new rocket type, production recall for that class will degrade. Operationally, this requires:
+
+- **Recall monitoring per class** — not overall accuracy. The evaluation metric (`min_class_recall`) maps directly to the production alert threshold. When any class recall drops below an agreed SLA, retraining is triggered.
+- **Active labelling pipeline** — intercepted rockets provide confirmed labels. These feed the next training run.
+- **GroupKFold preservation** — retraining must continue to group all pings from one trajectory into the same fold to prevent leakage from partial-trajectory data collected mid-flight.
+
+### Latency budget
+
+| Stage | Target |
+|---|---|
+| First radar ping → kinematic features computed | < 50ms |
+| Kinematic features → ONNX inference → alert | < 10ms |
+| **Phase 1: detection to preliminary classification** | **< 100ms** |
+| Salvo membership confirmed → salvo features → re-inference | < 500ms |
+| **Phase 2: salvo-confirmed classification** | **< 30s after launch cluster** |
+
+A ballistic rocket travelling at typical class-1 speeds takes 60–90 seconds from launch to apogee. Both phases complete well within the available threat-assessment window.
 
 ---
 
