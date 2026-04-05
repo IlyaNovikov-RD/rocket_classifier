@@ -375,7 +375,7 @@ make format           # ruff format
 make demo             # streamlit demo (localhost:8501)
 make download-models # fetch models/ from GitHub Release
 make download-all     # + cache/ parquet caches + data/ (test.csv, sample_submission.csv)
-make export-model     # convert model.lgb/pkl → model.onnx (run after model update)
+make export-model     # convert model.lgb → model.onnx (run after model update)
 make run              # inference pipeline → outputs/submission.csv
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
@@ -487,7 +487,7 @@ make interpret   # regenerates assets/shap_summary.png and assets/interpretation
 | **Runtime** | Python 3.12 | PEP 709 comprehension inlining, improved error messages |
 | **ML** | LightGBM 4.x, scikit-learn | Leaf-wise gradient boosting, GPU-accelerated Optuna, GroupKFold |
 | **Clustering** | scikit-learn DBSCAN | Spatiotemporal salvo and geographic rebel-group identification |
-| **Inference** | ONNX Runtime | 2.6x faster than sklearn wrapper via AVX2 vectorisation |
+| **Inference** | ONNX Runtime | ~2.6x faster than native LightGBM via AVX2 vectorisation |
 | **Validation** | Pydantic v2 | Schema enforcement on raw radar data |
 | **Explainability** | SHAP TreeExplainer | Exact Shapley values in O(TLD) time |
 | **Demo** | Streamlit, Plotly | Real-time 3D trajectory visualisation |

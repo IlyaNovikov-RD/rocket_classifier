@@ -181,8 +181,8 @@ def load_model(
     )
     X_train_35 = pd.concat([X_train_filled, prior_cols], axis=1)
 
-    # SHAP TreeExplainer requires the raw LightGBM Booster — not the ONNX or
-    # sklearn wrapper.  Load model.lgb directly to guarantee we get the booster
+    # SHAP TreeExplainer requires the raw LightGBM Booster — not the ONNX
+    # backend.  Load model.lgb directly to guarantee we get the booster
     # regardless of whether model.onnx is also present.
     import lightgbm as _lgb
 
