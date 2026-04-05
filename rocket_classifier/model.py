@@ -7,9 +7,9 @@ No training logic lives here — all training is performed via
 ``research/train.py`` (LightGBM + Optuna + proximity consensus → 1.0 OOB).
 
 Production artifacts (served from the latest GitHub Release — run ``make download-models``):
-    - model.onnx          — ONNX format (fastest inference, preferred)
-    - model.lgb           — native LightGBM text format (fast load, fallback)
-    - model.pkl           — joblib-pickled LGBMClassifier (legacy fallback)
+    - model_opt.onnx      — pre-optimized ONNX (fastest inference, preferred)
+    - model.onnx          — ONNX format (fallback)
+    - model.lgb           — native LightGBM text format (fallback, also used by export)
     - train_medians.npy   — per-feature NaN imputation medians (32 values)
     - threshold_biases.npy — per-class log-probability biases
 
@@ -21,7 +21,7 @@ importance in the trained model, so this approximation has no measurable
 effect on predictions.
 
 Backend selection order (automatic, first available wins):
-    model_opt.onnx  →  model.onnx  →  model.lgb  →  model.pkl
+    model_opt.onnx  →  model.onnx  →  model.lgb
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ class RocketClassifier:
     input).  This is transparent to callers.
 
     Backend is selected automatically based on which artifact files exist:
-    ``model_opt.onnx`` (fastest, pre-optimized) → ``model.onnx`` → ``model.lgb`` → ``model.pkl`` (legacy).
+    ``model_opt.onnx`` (fastest, pre-optimized) → ``model.onnx`` → ``model.lgb``.
 
     Usage::
 
@@ -194,10 +194,10 @@ class RocketClassifier:
     ) -> RocketClassifier:
         """Load a classifier from disk artifacts.
 
-        Tries backends in order of performance: pre-optimized ONNX → ONNX → native LightGBM → pkl.
+        Tries backends in order of performance: pre-optimized ONNX → ONNX → native LightGBM.
 
         Args:
-            model_path:   Path to the base model file (any of .onnx/.lgb/.pkl).
+            model_path:   Path to the base model file (any of .onnx/.lgb).
                           Sibling files with the other extensions are tried automatically.
             medians_path: Path to the 32-value NaN imputation medians (.npy).
             biases_path:  Optional path to threshold biases (.npy). If not
@@ -210,7 +210,6 @@ class RocketClassifier:
         onnx_opt_path = base.parent / (base.name + "_opt.onnx")  # pre-optimized, faster to load
         onnx_path = base.with_suffix(".onnx")
         lgb_path = base.with_suffix(".lgb")
-        pkl_path = base.with_suffix(".pkl")
 
         model: object
         backend_name: str
@@ -239,7 +238,7 @@ class RocketClassifier:
                 model = _ONNXBackend(session)
                 backend_name = f"ONNX ({_onnx_candidate.name})"
             except Exception as exc:
-                logger.warning("ONNX backend unavailable (%s), trying lgb/pkl", exc)
+                logger.warning("ONNX backend unavailable (%s), trying lgb", exc)
                 model = None  # type: ignore[assignment]
                 backend_name = ""
         else:
@@ -253,16 +252,10 @@ class RocketClassifier:
             model = _NativeLGBMBackend(booster)
             backend_name = f"native LightGBM ({lgb_path.name})"
 
-        if model is None and pkl_path.exists():
-            import joblib
-
-            model = joblib.load(str(pkl_path))
-            backend_name = f"joblib ({pkl_path.name})"
-
         if model is None:
             raise FileNotFoundError(
                 f"No model backends available. Checked: {onnx_opt_path}, "
-                f"{onnx_path}, {lgb_path}, {pkl_path}. "
+                f"{onnx_path}, {lgb_path}. "
                 f"Run 'make download-models' to download artifacts."
             )
 
