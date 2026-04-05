@@ -287,10 +287,10 @@ Adding threads beyond `cpu_count()` yields no further gain — there are no more
 
 **2. Memory-bandwidth bound (theoretical)**
 
-The irreducible work is 8,185 samples × 998 trees × depth 5 = **40.9M comparisons** across the ONNX model.
+The irreducible work is 8,185 samples × 1108 trees × depth 9 = **81.6M comparisons** across the ONNX model.
 
 ```
-Theoretical compute floor: 40.9M ops / 4 cores / 10⁹ ops/s  ≈  10ms
+Theoretical compute floor: 81.6M ops / 4 cores / 10⁹ ops/s  ≈  20ms
 Measured inference:                                            ~0.60s
 Overhead factor:                                               ~60x
 ```
@@ -299,7 +299,7 @@ This overhead is explained entirely by **cache miss cost**: the 5.8 MB model doe
 
 **3. Algorithm irreducibility**
 
-The 998 trees were determined by Optuna to be the minimum that achieves 1.0 global OOB min-recall with proximity consensus. Reducing tree count would degrade accuracy below the operational threshold. Traversing every tree for every sample is not optional.
+The 1108 trees were determined by Optuna to be the minimum that achieves 1.0 global OOB min-recall with proximity consensus. Reducing tree count would degrade accuracy below the operational threshold. Traversing every tree for every sample is not optional.
 
 **4. Backend optimality**
 
