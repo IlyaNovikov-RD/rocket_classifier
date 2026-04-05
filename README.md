@@ -292,7 +292,7 @@ The irreducible work is 8,185 samples × 1108 trees × depth 9 = **81.6M compari
 ```
 Theoretical compute floor: 81.6M ops / 4 cores / 10⁹ ops/s  ≈  20ms
 Measured inference:                                            ~0.60s
-Overhead factor:                                               ~60x
+Overhead factor:                                               ~30x
 ```
 
 This overhead is explained entirely by **cache miss cost**: the 5.8 MB model does not fit in L1/L2 cache (256 KB / 1 MB per core). Each tree traversal follows random pointers through L3 and main memory. Effective memory bandwidth for irregular-access tree walks is ~1–5 GB/s vs the raw L3 peak of ~100 GB/s.
