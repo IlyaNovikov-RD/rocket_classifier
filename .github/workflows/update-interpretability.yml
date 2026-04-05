@@ -45,13 +45,6 @@ jobs:
       - name: Download model artifacts + feature caches
         run: uv run python scripts/download_models.py --with-caches
 
-      - name: Download data files
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p data
-          gh release download --pattern "sample_submission.csv" --pattern "test.csv" --dir data
-
       - name: Export model.lgb → model.onnx + model_opt.onnx
         run: |
           uv pip install -q onnxmltools skl2onnx
