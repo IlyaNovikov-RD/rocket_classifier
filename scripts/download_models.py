@@ -41,9 +41,16 @@ CACHE_ARTIFACTS = [
     "cache_test_features.parquet",
 ]
 
+# Data artifacts downloaded alongside caches so the pipeline can run without data/.
+DATA_ARTIFACTS = [
+    "test.csv",
+    "sample_submission.csv",
+]
+
 ROOT = Path(__file__).parent.parent
 WEIGHTS_DIR = ROOT / "models"
 CACHE_DIR = ROOT / "cache"
+DATA_DIR = ROOT / "data"
 WEIGHTS_DIR.mkdir(exist_ok=True)
 CACHE_DIR.mkdir(exist_ok=True)
 
@@ -52,12 +59,19 @@ def main(include_caches: bool = False) -> None:
     """Download model artifacts from GitHub Release into models/ and cache/.
 
     Args:
-        include_caches: If True, also downloads parquet feature caches (~15 MB).
-            Required for ``make run`` when data/ is not available locally.
+        include_caches: If True, also downloads parquet feature caches (~15 MB)
+            and sample_submission.csv into data/. Required for ``make run``
+            when data/ is not available locally.
     """
-    required = ARTIFACTS + (CACHE_ARTIFACTS if include_caches else [])
+    required = ARTIFACTS + (CACHE_ARTIFACTS + DATA_ARTIFACTS if include_caches else [])
     for name in required:
-        dest = (CACHE_DIR if name.endswith(".parquet") else WEIGHTS_DIR) / name
+        if name.endswith(".parquet"):
+            dest = CACHE_DIR / name
+        elif name.endswith(".csv"):
+            DATA_DIR.mkdir(exist_ok=True)
+            dest = DATA_DIR / name
+        else:
+            dest = WEIGHTS_DIR / name
         if dest.exists():
             print(f"  {name} — already exists, skipping")
             continue
