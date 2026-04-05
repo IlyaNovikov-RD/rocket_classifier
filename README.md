@@ -206,7 +206,7 @@ log(proba) + biases [0.000000, -0.253165, 1.265823]  ──►  argmax
 Proximity consensus: group by launch position + 60 s window → mode vote
     │
     ▼
-outputs/submission.csv
+output/submission.csv
 ```
 
 ---
@@ -350,11 +350,11 @@ uv sync
 
 # Full pipeline — downloads ~20 MB from GitHub Release, runs in ~1.0s
 make pipeline
-# Output: outputs/submission.csv  +  updated assets/
+# Output: output/submission.csv  +  updated assets/
 
 # Step by step:
 make download-all    # artifacts/ + cache/ + data/ (test.csv, sample_submission.csv)
-make run             # → outputs/submission.csv
+make run             # → output/submission.csv
 make interpret       # → assets/shap_summary.png
 make visualize       # → assets/demo.png
 
@@ -376,12 +376,12 @@ make demo             # streamlit demo (localhost:8501)
 make download-models # fetch artifacts/ from GitHub Release
 make download-all     # + cache/ parquet caches + data/ (test.csv, sample_submission.csv)
 make export-model     # convert model.lgb → model.onnx (run after model update)
-make run              # inference pipeline → outputs/submission.csv
+make run              # inference pipeline → output/submission.csv
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 make pipeline         # download-all + run + interpret  (full end-to-end)
-make docker           # build + run Docker image → outputs/submission.csv
-make clean            # remove outputs/, cache/, artifacts/ for a fresh cold start
+make docker           # build + run Docker image → output/submission.csv
+make clean            # remove output/, cache/, artifacts/ for a fresh cold start
 ```
 
 ### Docker
@@ -396,7 +396,7 @@ docker run --rm rocket_classifier          # writes submission.csv inside the co
 To retrieve the output file:
 
 ```bash
-docker run --rm -v $(pwd)/outputs:/app/outputs rocket_classifier
+docker run --rm -v $(pwd)/output:/app/output rocket_classifier
 ```
 
 ---
@@ -454,7 +454,7 @@ The automation in this project is not boilerplate — each choice directly serve
 | **105 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
 | **CI on every PR** | Runs lint + tests + Docker build | Ensures the inference pipeline (`make run`) stays reproducible on any machine, not just the developer's laptop. |
 | **Docker** | Packages the full inference environment | Makes the submission pipeline portable — one `docker run` reproduces the exact result with no dependency drift. |
-| **`make run`** | Single command → `outputs/submission.csv` | The submission is the deliverable. One command replicates the full result from cached features, with no manual steps. |
+| **`make run`** | Single command → `output/submission.csv` | The submission is the deliverable. One command replicates the full result from cached features, with no manual steps. |
 | **`make release TAG=... NOTES=...`** | Validates all artifacts exist, creates GitHub Release, triggers post-release CI | Prevents the class of error we hit during development: forgetting to upload a cache file and silently breaking the pipeline. |
 | **Post-release CI pipeline** | Auto-generates ONNX model, runs inference, computes SHAP, uploads all to the release | Ensures the published release is always self-consistent — the submission.csv and SHAP plot in the release are always derived from the model in the same release. |
 | **`make download-models && make run`** | Reproduces the submission from scratch | Satisfies the reproducibility requirement: a grader can verify the result independently by running two commands. |

@@ -80,7 +80,7 @@ jobs:
           fi
           # Remove old submission.csv from release if it exists, then re-upload
           gh release delete-asset "$TAG" submission.csv --yes 2>/dev/null || true
-          gh release upload "$TAG" outputs/submission.csv
+          gh release upload "$TAG" output/submission.csv
 
       - name: Upload SHAP assets to release
         env:

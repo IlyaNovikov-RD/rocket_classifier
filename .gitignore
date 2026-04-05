@@ -23,7 +23,7 @@ cache/
 artifacts/
 
 # ── Pipeline outputs ──────────────────────────────────────────────────────────
-outputs/
+output/
 
 # ── Personal / IDE files ──────────────────────────────────────────────────────
 .claude/
