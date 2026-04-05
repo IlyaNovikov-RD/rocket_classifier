@@ -67,15 +67,26 @@ class TestTrajectoryPointInvalid:
                 z=0.0,
             )
 
-    def test_negative_altitude_rejected(self) -> None:
+    def test_large_negative_altitude_rejected(self) -> None:
         with pytest.raises(ValidationError):
             TrajectoryPoint(
                 traj_ind=1,
                 time_stamp="2024-01-01",
                 x=0.0,
                 y=0.0,
-                z=-1.0,
+                z=-2.0,
             )
+
+    def test_sensor_noise_z_clamped_to_zero(self) -> None:
+        """Tiny negative z (sensor noise) is clamped to 0, not rejected."""
+        pt = TrajectoryPoint(
+            traj_ind=1,
+            time_stamp="2024-01-01",
+            x=0.0,
+            y=0.0,
+            z=-0.004,
+        )
+        assert pt.z == 0.0
 
     def test_invalid_label_rejected(self) -> None:
         for bad_label in (3, -1, 99):
@@ -179,12 +190,18 @@ class TestValidateDataframe:
         _valid, errors = validate_dataframe(df, has_label=False)
         assert len(errors) == 0
 
-    def test_negative_altitude_row_flagged(self) -> None:
+    def test_large_negative_altitude_row_flagged(self) -> None:
         df = _make_df(has_label=True)
         df.loc[1, "z"] = -5.0
         _valid, errors = validate_dataframe(df, has_label=True)
         assert len(errors) == 1
         assert errors[0][0] == 1  # row index
+
+    def test_sensor_noise_z_row_passes(self) -> None:
+        df = _make_df(has_label=True)
+        df.loc[1, "z"] = -0.003
+        _valid, errors = validate_dataframe(df, has_label=True)
+        assert len(errors) == 0
 
     def test_missing_required_column(self) -> None:
         df = _make_df(has_label=False).drop(columns=["x"])
