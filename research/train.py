@@ -170,17 +170,12 @@ log = logging.getLogger("train")
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-# Auto-detect working directory: Colab mounts files at /content/,
-# everywhere else use the current working directory (expected: project root).
-DATA_DIR = Path("/content") if Path("/content").exists() else Path(".")
-# train.csv can live at the root (Colab) or under data/ (local checkout).
-_root_csv = DATA_DIR / "train.csv"
-_data_csv = DATA_DIR / "data" / "train.csv"
-TRAIN_CSV = _root_csv if _root_csv.exists() else _data_csv
-# cache/ and models/ mirror the production directory structure exactly,
-# so artifacts land in the right place on both Colab and local runs.
-CACHE_DIR = DATA_DIR / "cache"
-MODELS_DIR = DATA_DIR / "models"
+# Project root — works identically locally and on Colab (clone the repo,
+# data lives in data/, artifacts in cache/ and models/).
+ROOT = Path(".")
+TRAIN_CSV = ROOT / "data" / "train.csv"
+CACHE_DIR = ROOT / "cache"
+MODELS_DIR = ROOT / "models"
 CACHE_DIR.mkdir(exist_ok=True)
 MODELS_DIR.mkdir(exist_ok=True)
 FEATURE_CACHE = CACHE_DIR / "cache_train_features.parquet"
@@ -848,7 +843,7 @@ results = {
     "prox_time_window_s": PROX_TIME_WINDOW_S,
     "verdict": "1.0 achieved" if score_consensus >= 1.0 else f"{score_consensus:.6f}",
 }
-with open(DATA_DIR / "training_report.json", "w") as f:
+with open(ROOT / "training_report.json", "w") as f:
     json.dump(results, f, indent=2)
 
 log.info("")
