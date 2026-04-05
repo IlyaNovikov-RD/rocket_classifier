@@ -107,7 +107,7 @@ PRODUCTION_BIASES: np.ndarray = np.array([0.0, -0.25316455696202533, 1.265822784
 
 
 class _ONNXBackend:
-    """ONNX Runtime inference backend (fastest — 2.6x over sklearn wrapper)."""
+    """ONNX Runtime inference backend (fastest — ~2.6x over native LightGBM)."""
 
     def __init__(self, session: object) -> None:
         self._session = session
@@ -136,7 +136,7 @@ class _ONNXBackend:
 
 
 class _NativeLGBMBackend:
-    """Native LightGBM Booster backend (1.6x over sklearn wrapper)."""
+    """Native LightGBM Booster backend (fallback when ONNX Runtime unavailable)."""
 
     def __init__(self, booster: object) -> None:
         self._booster = booster

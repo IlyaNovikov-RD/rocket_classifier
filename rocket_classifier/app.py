@@ -17,7 +17,7 @@ Note on salvo/group features in the demo:
     inference on a full test set computes all 32 features correctly.
 
 Model loading strategy (in priority order):
-    1. Local artifacts in models/ (ONNX → native LightGBM → pkl).
+    1. Local artifacts in models/ (ONNX → native LightGBM).
     2. Remote download from the GitHub Release asset (automatic fallback).
 
 Run with:
