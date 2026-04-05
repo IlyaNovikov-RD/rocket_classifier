@@ -64,11 +64,24 @@ class TrajectoryPoint(BaseModel):
     time_stamp: datetime = Field(..., description="UTC datetime of the radar observation.")
     x: float = Field(..., description="Horizontal X-position in metres.")
     y: float = Field(..., description="Horizontal Y-position in metres.")
-    z: float = Field(..., ge=0.0, description="Altitude in metres (must be >= 0).")
+    z: float = Field(..., description="Altitude in metres.")
     label: int | None = Field(
         default=None,
         description="Class label in {0, 1, 2}. None for unlabelled test rows.",
     )
+
+    @field_validator("z", mode="after")
+    @classmethod
+    def clamp_sensor_noise_z(cls, v: float) -> float:
+        """Clamp tiny negative altitudes to zero.
+
+        Real sensor data contains floating-point noise around ground level
+        (observed range: ~-0.005 m to 0). Values below -1 m are rejected
+        as genuinely invalid.
+        """
+        if v < -1.0:
+            raise ValueError(f"altitude z={v:.4f} m is below -1 m — not sensor noise.")
+        return max(v, 0.0)
 
     @field_validator("label", mode="before")
     @classmethod
