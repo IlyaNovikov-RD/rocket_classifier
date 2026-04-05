@@ -111,13 +111,11 @@ def _safe_stats(arr: np.ndarray, prefix: str) -> dict[str, float]:
 
 
 def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
-    """Extract all physics-based and statistical features for one trajectory.
+    """Extract the 25 production kinematic features for one trajectory.
 
-    Computes 76 scalar features from the raw point sequence of a single
-    trajectory, including kinematic derivatives (velocity, acceleration, jerk),
-    ballistic parameters (launch angle, apogee), and spatial statistics.
-    All features are returned even for very short trajectories — derivative
-    features are set to NaN when insufficient points are available.
+    Computes only the kinematic features that survived backward elimination
+    and appear in ``SELECTED_FEATURES`` (see ``model.py``).  The 7
+    salvo/group features are added later by ``_add_salvo_group_features``.
 
     Args:
         group: DataFrame of rows belonging to a single ``traj_ind``,
@@ -127,7 +125,7 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
 
     Returns:
         A flat dictionary mapping feature name to float value. Contains
-        exactly 76 keys regardless of trajectory length. NaN is used for
+        exactly 25 keys regardless of trajectory length. NaN is used for
         features that cannot be computed (e.g. acceleration when N < 3).
     """
     feats: dict[str, float] = {}
@@ -138,185 +136,84 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     n_points = len(pos)
     feats["n_points"] = float(n_points)
 
+    _NAN_VELOCITY = {
+        "vy_mean": np.nan, "vy_max": np.nan,
+        "vz_median": np.nan,
+        "v_horiz_std": np.nan, "v_horiz_median": np.nan,
+        "initial_speed": np.nan, "initial_vz": np.nan, "final_vz": np.nan,
+    }
+    _NAN_ACCELERATION = {
+        "acc_mag_mean": np.nan, "acc_mag_min": np.nan, "acc_mag_max": np.nan,
+        "az_std": np.nan,
+        "acc_horiz_std": np.nan, "acc_horiz_min": np.nan, "acc_horiz_max": np.nan,
+        "mean_az": np.nan,
+    }
+
     if n_points == 0:
-        # Empty trajectory: return all NaN for every expected feature.
-        for prefix in [
-            "speed", "vx", "vy", "vz", "v_horiz", "acc_mag", "az", "acc_horiz", "jerk_mag",
-        ]:
-            for stat in ["mean", "std", "min", "max", "median"]:
-                feats[f"{prefix}_{stat}"] = np.nan
+        feats.update(_NAN_VELOCITY)
+        feats.update(_NAN_ACCELERATION)
         for k in [
-            "total_duration_s", "dt_mean", "dt_std", "dt_min", "dt_max", "dt_median",
-            "launch_angle_elev", "launch_angle_azimuth",
-            "initial_speed", "initial_vz", "initial_v_horiz", "final_speed", "final_vz",
-            "mean_az", "apogee_z", "initial_z", "final_z", "delta_z_total", "apogee_relative",
-            "apogee_time_frac", "time_to_apogee_s",
-            "x_range", "y_range", "z_range", "max_horiz_range", "final_horiz_range",
-            "path_length_3d", "launch_x", "launch_y", "launch_z",
+            "initial_z", "final_z", "delta_z_total", "apogee_relative",
+            "x_range", "y_range", "launch_x", "launch_y",
         ]:
             feats[k] = np.nan
         return feats
 
-    # --- Time features ---
-    dt_ns = np.diff(times).astype(np.float64)  # nanoseconds
-    dt_sec = dt_ns / 1e9  # seconds
-    # Guard against zero or negative dt (duplicate timestamps)
+    # --- Time deltas (needed for derivatives, not stored as features) ---
+    dt_ns = np.diff(times).astype(np.float64)
+    dt_sec = dt_ns / 1e9
     dt_sec = np.where(dt_sec <= 0, np.nan, dt_sec)
     valid_dt = dt_sec[~np.isnan(dt_sec)]
 
-    total_duration = float(np.nansum(dt_sec)) if len(dt_sec) > 0 else 0.0
-    feats["total_duration_s"] = total_duration
-    feats.update(_safe_stats(valid_dt, "dt"))
-
-    # --- 3D Velocity ---
+    # --- Velocity & Acceleration ---
     if n_points >= 2 and valid_dt.size > 0:
-        # Replace nan dt with median for derivative computation
         dt_filled = np.where(np.isnan(dt_sec), np.nanmedian(dt_sec), dt_sec)
-        vel, acc, jerk = _compute_derivatives(pos, dt_filled)
-
-        speed = np.linalg.norm(vel, axis=1)
-        feats.update(_safe_stats(speed, "speed"))
+        vel, acc, _jerk = _compute_derivatives(pos, dt_filled)
 
         vx, vy, vz = vel[:, 0], vel[:, 1], vel[:, 2]
-        feats.update(_safe_stats(vx, "vx"))
-        feats.update(_safe_stats(vy, "vy"))
-        feats.update(_safe_stats(vz, "vz"))
-
-        # Horizontal speed
+        speed = np.linalg.norm(vel, axis=1)
         v_horiz = np.sqrt(vx**2 + vy**2)
-        feats.update(_safe_stats(v_horiz, "v_horiz"))
 
-        # --- Launch angle (elevation angle of initial velocity vector) ---
-        # Angle between initial velocity and horizontal plane
-        feats["launch_angle_elev"] = (
-            float(np.arctan2(vz[0], np.sqrt(vx[0] ** 2 + vy[0] ** 2))) if speed[0] > 0 else np.nan
-        )
-
-        # Azimuth of initial velocity (heading in horizontal plane)
-        # When speed is zero, azimuth is undefined — arctan2(0,0)=0 is meaningless
-        feats["launch_angle_azimuth"] = float(np.arctan2(vy[0], vx[0])) if speed[0] > 0 else np.nan
-
-        # Initial speed components
+        feats["vy_mean"] = float(np.mean(vy))
+        feats["vy_max"] = float(np.max(vy))
+        feats["vz_median"] = float(np.median(vz))
+        feats["v_horiz_std"] = float(np.std(v_horiz))
+        feats["v_horiz_median"] = float(np.median(v_horiz))
         feats["initial_speed"] = float(speed[0])
         feats["initial_vz"] = float(vz[0])
-        feats["initial_v_horiz"] = float(v_horiz[0])
-
-        # Final speed components
-        feats["final_speed"] = float(speed[-1])
         feats["final_vz"] = float(vz[-1])
 
-        # --- 3D Acceleration ---
         if acc.shape[0] > 0:
             acc_mag = np.linalg.norm(acc, axis=1)
-            feats.update(_safe_stats(acc_mag, "acc_mag"))
-
             ax, ay, az = acc[:, 0], acc[:, 1], acc[:, 2]
-            feats.update(_safe_stats(az, "az"))  # vertical acceleration (gravity proxy)
-            feats.update(_safe_stats(np.sqrt(ax**2 + ay**2), "acc_horiz"))
+            acc_horiz = np.sqrt(ax**2 + ay**2)
 
-            feats["mean_az"] = float(np.mean(az))  # should be ~-g for ballistic
-
+            feats["acc_mag_mean"] = float(np.mean(acc_mag))
+            feats["acc_mag_min"] = float(np.min(acc_mag))
+            feats["acc_mag_max"] = float(np.max(acc_mag))
+            feats["az_std"] = float(np.std(az))
+            feats["acc_horiz_std"] = float(np.std(acc_horiz))
+            feats["acc_horiz_min"] = float(np.min(acc_horiz))
+            feats["acc_horiz_max"] = float(np.max(acc_horiz))
+            feats["mean_az"] = float(np.mean(az))
         else:
-            for k in [
-                "acc_mag_mean",
-                "acc_mag_std",
-                "acc_mag_min",
-                "acc_mag_max",
-                "acc_mag_median",
-                "az_mean",
-                "az_std",
-                "az_min",
-                "az_max",
-                "az_median",
-                "acc_horiz_mean",
-                "acc_horiz_std",
-                "acc_horiz_min",
-                "acc_horiz_max",
-                "acc_horiz_median",
-                "mean_az",
-            ]:
-                feats[k] = np.nan
-
-        # --- 3D Jerk ---
-        if jerk.shape[0] > 0:
-            jerk_mag = np.linalg.norm(jerk, axis=1)
-            feats.update(_safe_stats(jerk_mag, "jerk_mag"))
-        else:
-            for k in [
-                "jerk_mag_mean",
-                "jerk_mag_std",
-                "jerk_mag_min",
-                "jerk_mag_max",
-                "jerk_mag_median",
-            ]:
-                feats[k] = np.nan
-
+            feats.update(_NAN_ACCELERATION)
     else:
-        # Not enough points for derivatives
-        for prefix in [
-            "speed",
-            "vx",
-            "vy",
-            "vz",
-            "v_horiz",
-            "acc_mag",
-            "az",
-            "acc_horiz",
-            "jerk_mag",
-        ]:
-            for stat in ["mean", "std", "min", "max", "median"]:
-                feats[f"{prefix}_{stat}"] = np.nan
-        for k in [
-            "launch_angle_elev",
-            "launch_angle_azimuth",
-            "initial_speed",
-            "initial_vz",
-            "initial_v_horiz",
-            "final_speed",
-            "final_vz",
-            "mean_az",
-        ]:
-            feats[k] = np.nan
+        feats.update(_NAN_VELOCITY)
+        feats.update(_NAN_ACCELERATION)
 
-    # --- Apogee and Time-to-Apogee ---
+    # --- Altitude ---
     z_vals = pos[:, 2]
-    apogee_idx = int(np.argmax(z_vals))
-    feats["apogee_z"] = float(z_vals[apogee_idx])
     feats["initial_z"] = float(z_vals[0])
     feats["final_z"] = float(z_vals[-1])
     feats["delta_z_total"] = float(z_vals[-1] - z_vals[0])
-    feats["apogee_relative"] = float(z_vals[apogee_idx] - z_vals[0])
+    feats["apogee_relative"] = float(z_vals.max() - z_vals[0])
 
-    # Time to apogee (fraction of total trajectory)
-    feats["apogee_time_frac"] = float(apogee_idx / max(n_points - 1, 1))
-    # Absolute time to apogee — use direct timestamp subtraction to avoid
-    # nansum gaps from duplicate-timestamp NaNs understating the true elapsed time
-    if apogee_idx > 0:
-        feats["time_to_apogee_s"] = float((times[apogee_idx] - times[0]).astype(np.float64) / 1e9)
-    else:
-        feats["time_to_apogee_s"] = 0.0
-
-    # --- Spatial extent ---
+    # --- Spatial extent & launch position ---
     feats["x_range"] = float(np.ptp(pos[:, 0]))
     feats["y_range"] = float(np.ptp(pos[:, 1]))
-    feats["z_range"] = float(np.ptp(pos[:, 2]))
-
-    # 2D horizontal range (max displacement in xy plane from launch)
-    xy_disp = np.sqrt((pos[:, 0] - pos[0, 0]) ** 2 + (pos[:, 1] - pos[0, 1]) ** 2)
-    feats["max_horiz_range"] = float(np.max(xy_disp))
-    feats["final_horiz_range"] = float(xy_disp[-1])
-
-    # --- Path length ---
-    if n_points >= 2:
-        segment_lengths = np.linalg.norm(np.diff(pos, axis=0), axis=1)
-        feats["path_length_3d"] = float(np.sum(segment_lengths))
-    else:
-        feats["path_length_3d"] = 0.0
-
-    # --- Initial position (launch point) ---
     feats["launch_x"] = float(pos[0, 0])
     feats["launch_y"] = float(pos[0, 1])
-    feats["launch_z"] = float(pos[0, 2])
 
     return feats
 
@@ -461,8 +358,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     Returns:
         Per-trajectory feature DataFrame with ``traj_ind`` as the index.
-        Shape is (n_trajectories, 83) without label, (n_trajectories, 84)
-        with label — 76 kinematic features plus 7 salvo/group features.
+        Shape is (n_trajectories, 33) without label, (n_trajectories, 34)
+        with label — 25 kinematic features plus 7 salvo/group features
+        plus ``launch_time``.
         All values are float64; NaN indicates a feature that could not be
         computed for a given trajectory.
     """

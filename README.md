@@ -101,13 +101,13 @@ A separate experiment tested a Transformer encoder operating on raw radar sequen
 Raw radar pings (x, y, z, t)
     │
     ▼
-Kinematic Feature Engineering ──► 76 physics features per trajectory
+Kinematic Feature Engineering ──► 25 physics features per trajectory
     │
     ▼
 Salvo/Group Feature Engineering ──► +7 features via DBSCAN (assumptions 3a-3c)
-    │                                  (83 total)
+    │                                  (32 total)
     ▼
-Backward Elimination ──► 32 features selected (25 kinematic + 7 salvo/group)
+LightGBM trained on 32 features (25 kinematic + 7 salvo/group)
     │
     ▼
 LightGBM + Optuna (GPU, stops when OOB consensus = 1.0) ──► hyperparameters
@@ -125,7 +125,7 @@ models/model.lgb  ·  models/train_medians.npy  ·  models/threshold_biases.npy
 ### Production Inference Pipeline (`make run`)
 
 ```
-cache/cache_test_features.feather   (pre-computed 83-feature matrix, Arrow IPC)
+cache/cache_test_features.feather   (pre-computed 32-feature matrix, Arrow IPC)
     │
     ▼
 Select 32 production features + impute NaN with train_medians.npy
@@ -151,7 +151,7 @@ outputs/submission.csv
 
 ### Feature Engineering
 
-Raw radar pings are aggregated into **83 scalar features** per trajectory — 76 kinematic features from finite-difference physics (assumptions 1 & 2), plus 7 salvo and rebel-group features from DBSCAN clustering (assumption 3). **32 are used in production** after automated backward elimination.
+Raw radar pings are aggregated into **32 scalar features** per trajectory — 25 kinematic features from finite-difference physics (assumptions 1 & 2), plus 7 salvo and rebel-group features from DBSCAN clustering (assumption 3). These 32 survived automated backward elimination during training.
 
 **Why these features discriminate between rocket classes:**
 
@@ -165,7 +165,7 @@ Raw radar pings are aggregated into **83 scalar features** per trajectory — 76
 | **Temporal** — `n_points` | 1 | Number of radar returns reflects trajectory duration and radar exposure. Longer-range rockets produce more pings; very short trajectories (few pings) signal specific launch geometries. |
 | **Salvo/group** — `salvo_size`, `salvo_duration_s`, `salvo_spatial_spread_m`, `salvo_time_rank`, `group_total_rockets`, `group_n_salvos`, `group_max_salvo_size` | 7 | See [Domain Assumptions](#domain-assumptions-that-shaped-the-solution). `salvo_time_rank` (rank 12 by SHAP) carries a kinematic imprint from the firing sequence; `group_max_salvo_size` proxies launcher type (assumption 3a). |
 
-**Why 32 and not all 83?** Automated backward elimination on the full training set showed that the remaining 51 features did not improve `min_class_recall` when added individually — they either encoded redundant information or introduced noise.
+**Why 32?** Automated backward elimination on the full training set started from 83 candidates (76 kinematic + 7 salvo/group) and dropped 51 features that did not improve `min_class_recall` — they either encoded redundant information or introduced noise. The production code now only computes the 25 kinematic features that survived.
 
 > **Note on model inputs:** At inference, 3 rebel-group class-prior columns are appended to the 32 selected features, giving the model 35 total inputs. These priors (global training class distribution: 68.6%/24.3%/7.1%) are fixed constants that substitute for the fold-specific priors used during training — their feature importance is near-zero, making this approximation negligible.
 
@@ -282,12 +282,12 @@ For a long-running server that loads the model once and handles repeated request
 
 | Stage | Time |
 |---|---|
-| Load raw CSVs (1M+ rows) | ~4s |
-| Pydantic schema validation | ~3m |
-| Kinematic feature engineering (76 features × 32k trajectories) | ~96s |
-| Salvo/group feature engineering (DBSCAN) | ~15s |
-| Model inference | ~1.0s |
-| **Total cold start** | **~6 min** |
+| Load raw CSVs (1M+ rows) | ~3s |
+| Pydantic schema validation (train + test) | ~2m 50s |
+| Feature engineering — train (25 kinematic + 7 salvo/group × 32k trajectories) | ~76s |
+| Feature engineering — test (25 kinematic + 7 salvo/group × 8k trajectories) | ~19s |
+| Model inference + consensus | ~1.0s |
+| **Total cold start** | **~4.5 min** |
 
 ## Transitioning to Real-Time Operations
 
@@ -467,7 +467,7 @@ docker run -v $(pwd)/outputs:/app/outputs rocket-classifier
 ```
 rocket_classifier/              # Production inference package
 ├── __init__.py
-├── features.py                 # 83 physics + salvo/group features (single source of truth)
+├── features.py                 # 25 kinematic + 7 salvo/group features (single source of truth)
 ├── model.py                    # RocketClassifier — loads LightGBM, applies biases
 ├── schema.py                   # Pydantic v2 data contracts (TrajectoryPoint)
 ├── main.py                     # Inference pipeline: features → predict → submission.csv
@@ -496,9 +496,9 @@ models/                        # Model artifacts — gitignored, from GitHub Rel
 └── threshold_biases.npy        # Per-class log-probability biases [0.000000, 1.265823, 1.063291]
 
 cache/                          # Feature caches — gitignored
-├── cache_train_features.parquet   # 83-feature matrix (canonical)
+├── cache_train_features.parquet   # 25-kinematic feature matrix (canonical)
 ├── cache_train_features.feather   # Arrow IPC sidecar — fast reads
-├── cache_test_features.parquet
+├── cache_test_features.parquet    # 32-feature matrix (25 kinematic + 7 salvo/group)
 └── cache_test_features.feather
 ```
 
