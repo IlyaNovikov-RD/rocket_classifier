@@ -16,13 +16,15 @@
 #   make interpret         Regenerate SHAP plot + report after a new model is deployed
 #   make visualize         Regenerate demo.png (physics feature visualization)
 #   make pipeline          Full local pipeline: download-all → run → interpret
+#   make docker            Build + run Docker image → outputs/submission.csv
+#   make clean             Remove outputs/, cache/, models/ for a fresh cold start
 #
 # After training a new model (research/train.py):
 #   make export-model                         # build model.onnx + model_opt.onnx
 #   make release TAG=v1.x.0 NOTES="..."      # upload all artifacts + trigger CI
 #   ONNX files are included in the release from the start (no download gap).
 
-.PHONY: install test lint format demo lock download-models download-all run interpret visualize pipeline export-model release
+.PHONY: install test lint format demo lock download-models download-all run interpret visualize pipeline export-model release docker clean
 
 install:
 	uv sync --group dev
@@ -61,6 +63,14 @@ visualize:
 
 export-model:
 	uv run python scripts/export_fast_models.py
+
+clean:
+	rm -rf outputs/ cache/ models/ __pycache__ rocket_classifier/__pycache__ tests/__pycache__
+	@echo "Cleaned outputs/, cache/, models/, and __pycache__. Run make download-all to re-fetch artifacts."
+
+docker:
+	docker build -t rocket_classifier .
+	docker run --rm -v $$(pwd)/outputs:/app/outputs rocket_classifier
 
 pipeline: download-all run interpret
 	@echo "Pipeline complete. submission.csv and assets/ are up to date."

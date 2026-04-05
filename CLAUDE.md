@@ -18,6 +18,8 @@ make demo             # launch Streamlit app (localhost:8501)
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 make export-model     # convert model.lgb → model.onnx + model_opt.onnx (required before release; requires onnxmltools skl2onnx)
+make docker           # build + run Docker image → outputs/submission.csv
+make clean            # remove outputs/, cache/, models/ for a fresh cold start
 make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts (ONNX required)
 ```
 
