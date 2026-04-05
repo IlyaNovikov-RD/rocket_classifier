@@ -26,7 +26,7 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 
 **Production package** (`rocket_classifier/`): Inference-only. No training code.
 
-- `features.py` — Extracts 83 features per trajectory: 76 physics features from raw `(x, y, z, time_stamp)` radar pings via finite-difference kinematics, plus 7 salvo/rebel-group features from DBSCAN clustering (domain assumptions 3a-3c). Single source of truth for feature engineering.
+- `features.py` — Extracts 32 features per trajectory: 25 kinematic features from raw `(x, y, z, time_stamp)` radar pings via finite-difference kinematics, plus 7 salvo/rebel-group features from DBSCAN clustering (domain assumptions 3a-3c). Single source of truth for feature engineering.
 - `model.py` — `RocketClassifier` class. Backend selected automatically: `model_opt.onnx` (pre-optimized ONNX, fastest) → `model.onnx` → `model.lgb` → `model.pkl`. Contains `SELECTED_FEATURES` (32 features used in production: 25 kinematic + 7 salvo/group), `PRODUCTION_BIASES` (threshold-tuned log-probability biases), and `_GLOBAL_CLASS_PRIOR` (appended rebel-group prior columns). These are the single source of truth — never duplicate them.
 - `schema.py` — Pydantic v2 validation for raw radar data (`TrajectoryPoint`, `validate_dataframe`).
 - `main.py` — Orchestrates: load data → validate → featurize → predict → proximity consensus → write `outputs/submission.csv`.
@@ -42,7 +42,7 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 ## Key Design Decisions
 
 - **Metric**: `min_class_recall` — worst-class recall. Every design choice optimises for this, not accuracy.
-- **32 features, not 83**: Backward elimination dropped noise kinematic features; 7 salvo/group features were added via domain assumptions. The 32 in `SELECTED_FEATURES` are what the model was trained on.
+- **32 features**: 25 kinematic features that survived backward elimination, plus 7 salvo/group features from domain assumptions. Production code only computes these 32 — the 51 eliminated features are no longer extracted.
 - **Model input = 35**: The model was trained with 32 base features + 3 rebel-group class-prior columns appended per fold. At production inference `_GLOBAL_CLASS_PRIOR` (the training class distribution) substitutes for those 3 columns — they have near-zero feature importance.
 - **Threshold biases** `[0.000000, 1.265823, 1.063291]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `models/threshold_biases.npy` and `training_report.json`.
 - **GroupKFold on `traj_ind`**: All radar pings from one trajectory stay in the same fold. Prevents data leakage.

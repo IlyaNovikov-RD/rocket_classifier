@@ -56,87 +56,36 @@ def _make_group(
 
 
 # The full set of feature keys _extract_trajectory_features must always return.
-# Derived from the implementation's two code paths (with / without derivatives).
+# After backward elimination, only 25 kinematic features are computed.
 _ALWAYS_PRESENT = {
     "n_points",
-    "total_duration_s",
-    "dt_mean",
-    "dt_std",
-    "dt_min",
-    "dt_max",
-    "dt_median",
-    "apogee_z",
     "initial_z",
     "final_z",
     "delta_z_total",
     "apogee_relative",
-    "apogee_time_frac",
-    "time_to_apogee_s",
     "x_range",
     "y_range",
-    "z_range",
-    "max_horiz_range",
-    "final_horiz_range",
-    "path_length_3d",
     "launch_x",
     "launch_y",
-    "launch_z",
 }
 
 _DERIVATIVE_KEYS = {
-    "speed_mean",
-    "speed_std",
-    "speed_min",
-    "speed_max",
-    "speed_median",
-    "vx_mean",
-    "vx_std",
-    "vx_min",
-    "vx_max",
-    "vx_median",
     "vy_mean",
-    "vy_std",
-    "vy_min",
     "vy_max",
-    "vy_median",
-    "vz_mean",
-    "vz_std",
-    "vz_min",
-    "vz_max",
     "vz_median",
-    "v_horiz_mean",
     "v_horiz_std",
-    "v_horiz_min",
-    "v_horiz_max",
     "v_horiz_median",
+    "initial_speed",
+    "initial_vz",
+    "final_vz",
     "acc_mag_mean",
-    "acc_mag_std",
     "acc_mag_min",
     "acc_mag_max",
-    "acc_mag_median",
-    "az_mean",
     "az_std",
-    "az_min",
-    "az_max",
-    "az_median",
-    "acc_horiz_mean",
     "acc_horiz_std",
     "acc_horiz_min",
     "acc_horiz_max",
-    "acc_horiz_median",
     "mean_az",
-    "jerk_mag_mean",
-    "jerk_mag_std",
-    "jerk_mag_min",
-    "jerk_mag_max",
-    "jerk_mag_median",
-    "launch_angle_elev",
-    "launch_angle_azimuth",
-    "initial_speed",
-    "initial_vz",
-    "initial_v_horiz",
-    "final_speed",
-    "final_vz",
 }
 
 ALL_EXPECTED_KEYS = _ALWAYS_PRESENT | _DERIVATIVE_KEYS
@@ -350,12 +299,6 @@ class TestSinglePointTrajectory:
     def test_n_points_is_one(self):
         assert self.feats["n_points"] == 1.0
 
-    def test_total_duration_is_zero(self):
-        assert self.feats["total_duration_s"] == 0.0
-
-    def test_path_length_is_zero(self):
-        assert self.feats["path_length_3d"] == 0.0
-
     def test_all_derivative_features_are_nan(self):
         for key in _DERIVATIVE_KEYS:
             assert math.isnan(self.feats[key]), f"{key} should be NaN for 1-point trajectory"
@@ -363,14 +306,9 @@ class TestSinglePointTrajectory:
     def test_launch_position_correct(self):
         assert self.feats["launch_x"] == pytest.approx(5.0)
         assert self.feats["launch_y"] == pytest.approx(3.0)
-        assert self.feats["launch_z"] == pytest.approx(10.0)
 
-    def test_apogee_equals_single_z(self):
-        assert self.feats["apogee_z"] == pytest.approx(10.0)
-
-    def test_apogee_time_frac_is_zero(self):
-        # Only one point → idx=0 → 0 / max(0,1) = 0
-        assert self.feats["apogee_time_frac"] == pytest.approx(0.0)
+    def test_apogee_relative_equals_zero_for_single_point(self):
+        assert self.feats["apogee_relative"] == pytest.approx(0.0)
 
 
 # ===========================================================================
@@ -385,141 +323,30 @@ class TestTwoPointTrajectory:
         self.feats = _extract_trajectory_features(self.group)
 
     def test_velocity_features_are_finite(self):
-        for stat in ["mean", "std", "min", "max", "median"]:
-            assert math.isfinite(self.feats[f"speed_{stat}"])
+        for key in ["vy_mean", "vy_max", "vz_median", "v_horiz_std", "v_horiz_median"]:
+            assert math.isfinite(self.feats[key]), f"{key} should be finite"
 
     def test_acceleration_features_are_nan(self):
         """2 points → only 1 velocity estimate → acc requires 2 → NaN."""
-        for stat in ["mean", "std", "min", "max", "median"]:
-            assert math.isnan(self.feats[f"acc_mag_{stat}"])
-
-    def test_jerk_features_are_nan(self):
-        for stat in ["mean", "std", "min", "max", "median"]:
-            assert math.isnan(self.feats[f"jerk_mag_{stat}"])
+        for key in ["acc_mag_mean", "acc_mag_min", "acc_mag_max"]:
+            assert math.isnan(self.feats[key])
 
     def test_initial_speed_correct(self):
         # displacement = sqrt(3), dt = 1 → speed = sqrt(3)
         assert self.feats["initial_speed"] == pytest.approx(math.sqrt(3), rel=1e-6)
 
-    def test_path_length_correct(self):
-        assert self.feats["path_length_3d"] == pytest.approx(math.sqrt(3), rel=1e-6)
-
 
 # ===========================================================================
-# _extract_trajectory_features — launch angle
-# ===========================================================================
-
-
-class TestLaunchAngle:
-    def test_vertical_launch_elevation_is_pi_over_2(self):
-        """Pure vertical launch: vx=0, vy=0, vz>0 → arctan2(vz, 0) = π/2.
-        This would be a division-by-zero with atan(vz/v_horiz) but
-        arctan2 handles it correctly, returning π/2."""
-        group = _make_group(
-            [0.0, 0.0],  # x constant
-            [0.0, 0.0],  # y constant
-            [0.0, 1.0],  # z increases → purely vertical
-            dt_seconds=[1.0],
-        )
-        feats = _extract_trajectory_features(group)
-        assert feats["launch_angle_elev"] == pytest.approx(math.pi / 2, rel=1e-6)
-
-    def test_horizontal_launch_elevation_is_zero(self):
-        """Purely horizontal motion → elevation angle = 0."""
-        group = _make_group(
-            [0.0, 1.0],
-            [0.0, 0.0],
-            [0.0, 0.0],  # z constant
-            dt_seconds=[1.0],
-        )
-        feats = _extract_trajectory_features(group)
-        assert feats["launch_angle_elev"] == pytest.approx(0.0, abs=1e-10)
-
-    def test_45_degree_elevation_angle(self):
-        """Equal vertical and horizontal velocity → 45° elevation."""
-        group = _make_group(
-            [0.0, 1.0],  # vx = 1 m/s
-            [0.0, 0.0],
-            [0.0, 1.0],  # vz = 1 m/s
-            dt_seconds=[1.0],
-        )
-        feats = _extract_trajectory_features(group)
-        assert feats["launch_angle_elev"] == pytest.approx(math.pi / 4, rel=1e-6)
-
-    def test_azimuth_due_north(self):
-        """Motion in +y only → azimuth = π/2 (north in atan2 convention)."""
-        group = _make_group(
-            [0.0, 0.0],
-            [0.0, 1.0],  # vy > 0, vx = 0
-            [0.0, 0.0],
-            dt_seconds=[1.0],
-        )
-        feats = _extract_trajectory_features(group)
-        assert feats["launch_angle_azimuth"] == pytest.approx(math.pi / 2, rel=1e-6)
-
-    def test_zero_speed_elevation_is_nan(self):
-        """If the rocket does not move (speed=0), elevation angle should be NaN."""
-        group = _make_group(
-            [1.0, 1.0],  # no displacement
-            [1.0, 1.0],
-            [1.0, 1.0],
-            dt_seconds=[1.0],
-        )
-        feats = _extract_trajectory_features(group)
-        assert math.isnan(feats["launch_angle_elev"])
-
-    def test_zero_speed_azimuth_is_nan(self):
-        """If the rocket does not move (speed=0), azimuth should also be NaN,
-        not arctan2(0,0)=0 which is a meaningless value."""
-        group = _make_group(
-            [1.0, 1.0],  # no displacement
-            [1.0, 1.0],
-            [1.0, 1.0],
-            dt_seconds=[1.0],
-        )
-        feats = _extract_trajectory_features(group)
-        assert math.isnan(feats["launch_angle_azimuth"])
-
-
-# ===========================================================================
-# _extract_trajectory_features — apogee
+# _extract_trajectory_features — apogee_relative
 # ===========================================================================
 
 
 class TestApogee:
-    def test_apogee_is_maximum_z(self):
-        zs = [0.0, 10.0, 20.0, 15.0, 5.0]
-        group = _make_group(list(range(5)), [0.0] * 5, zs)
-        feats = _extract_trajectory_features(group)
-        assert feats["apogee_z"] == pytest.approx(20.0)
-
     def test_apogee_relative_is_rise_from_launch(self):
         zs = [5.0, 15.0, 25.0, 10.0]
         group = _make_group(list(range(4)), [0.0] * 4, zs)
         feats = _extract_trajectory_features(group)
         assert feats["apogee_relative"] == pytest.approx(20.0)  # 25 - 5
-
-    def test_apogee_time_frac_midpoint(self):
-        """Peak at index 2 of 5 points (0-indexed) → frac = 2/4 = 0.5."""
-        zs = [0.0, 5.0, 10.0, 5.0, 0.0]
-        group = _make_group(list(range(5)), [0.0] * 5, zs)
-        feats = _extract_trajectory_features(group)
-        assert feats["apogee_time_frac"] == pytest.approx(0.5)
-
-    def test_time_to_apogee_absolute(self):
-        """5 points, 0.1 s intervals, peak at index 2 → time = 0.2 s."""
-        zs = [0.0, 5.0, 10.0, 5.0, 0.0]
-        group = _make_group(list(range(5)), [0.0] * 5, zs, dt_seconds=[0.1, 0.1, 0.1, 0.1])
-        feats = _extract_trajectory_features(group)
-        assert feats["time_to_apogee_s"] == pytest.approx(0.2, rel=1e-6)
-
-    def test_monotone_descent_apogee_at_start(self):
-        """If rocket only descends, apogee is the first point."""
-        zs = [100.0, 80.0, 50.0, 10.0]
-        group = _make_group(list(range(4)), [0.0] * 4, zs)
-        feats = _extract_trajectory_features(group)
-        assert feats["apogee_z"] == pytest.approx(100.0)
-        assert feats["apogee_time_frac"] == pytest.approx(0.0)
 
 
 # ===========================================================================
@@ -554,7 +381,7 @@ class TestDuplicateTimestamps:
         )
         feats = _extract_trajectory_features(group)
         for key in _DERIVATIVE_KEYS:
-            assert math.isnan(feats[key]), f"{key} should be NaN when all dt=0"
+            assert math.isnan(feats.get(key, float("nan"))), f"{key} should be NaN when all dt=0"
 
 
 # ===========================================================================
@@ -567,23 +394,6 @@ class TestSpatialFeatures:
         group = _make_group([1.0, 4.0, 2.0], [0.0] * 3, [0.0] * 3)
         feats = _extract_trajectory_features(group)
         assert feats["x_range"] == pytest.approx(3.0)
-
-    def test_z_range(self):
-        group = _make_group([0.0] * 4, [0.0] * 4, [0.0, 5.0, 10.0, 3.0])
-        feats = _extract_trajectory_features(group)
-        assert feats["z_range"] == pytest.approx(10.0)
-
-    def test_max_horiz_range(self):
-        """Max horizontal displacement from the launch point."""
-        group = _make_group([0.0, 3.0, 4.0], [0.0, 4.0, 0.0], [0.0] * 3)
-        feats = _extract_trajectory_features(group)
-        # Point 1: sqrt(9+16)=5, Point 2: sqrt(16+0)=4 → max=5
-        assert feats["max_horiz_range"] == pytest.approx(5.0, rel=1e-6)
-
-    def test_final_horiz_range(self):
-        group = _make_group([0.0, 3.0], [0.0, 4.0], [0.0, 0.0], dt_seconds=[1.0])
-        feats = _extract_trajectory_features(group)
-        assert feats["final_horiz_range"] == pytest.approx(5.0, rel=1e-6)
 
     def test_delta_z_total(self):
         group = _make_group([0.0] * 3, [0.0] * 3, [2.0, 7.0, 5.0])
@@ -661,8 +471,8 @@ class TestBuildFeatures:
         assert "label" not in result.columns
 
     def test_feature_count_matches_expected(self):
-        """76 kinematic + 7 salvo/group + label + launch_time = 85 columns."""
-        n_kinematic = 76
+        """25 kinematic + 7 salvo/group + label + launch_time = 34 columns."""
+        n_kinematic = 25
         n_salvo_group = 7
         n_label = 1
         n_launch_time = 1
@@ -774,4 +584,4 @@ class TestBuildFeatures:
         )
         result = build_features(df)
         assert len(result) == 1
-        assert not result["speed_mean"].isna().any()
+        assert not result["initial_speed"].isna().any()

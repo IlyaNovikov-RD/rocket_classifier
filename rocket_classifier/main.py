@@ -259,9 +259,8 @@ def main() -> None:
         biases_path=BIASES_PATH if BIASES_PATH.exists() else None,
     )
 
-    # Select the 32 production features from the 83-column matrix.
-    # If the cache was built with an older version of features.py that lacked
-    # salvo/group columns, reindex fills them with NaN — they will be imputed
+    # Select the 32 production features from the feature matrix.
+    # reindex fills any missing columns with NaN — they will be imputed
     # from train_medians.npy.  Delete cache/*.parquet and re-run to rebuild.
     X_test = test_feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32)
 

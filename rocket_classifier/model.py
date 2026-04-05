@@ -155,7 +155,7 @@ class RocketClassifier:
 
     Loads the model and imputation artifacts once, then provides a
     ``predict`` method that takes a feature array (32 columns, selected
-    from the 83 engineered by ``build_features`` via ``SELECTED_FEATURES``)
+    from the 32 engineered by ``build_features`` via ``SELECTED_FEATURES``)
     and returns threshold-tuned class predictions.
 
     Internally, 3 rebel-group class-prior columns are appended to the 32
