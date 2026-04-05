@@ -232,7 +232,7 @@ All OOB misses were class-0 rockets mispredicted as class-1. Diagnostic analysis
 **Validation on training data:**
 - Group class purity: **100%** (every proximity group is class-pure — no risk of consensus introducing errors)
 - n_broken: **0** (consensus never worsened a correct prediction)
-- OOB score: **0.999866 → 1.000000**
+- OOB score: **0.999874 → 1.000000**
 
 **This is not overfitting.** Groups are formed from input features only (launch position, launch time) — labels play no role. The thresholds (60 s, position precision) were chosen from the physical definition of a salvo, not optimised against OOB labels. Purity was measured after the fact to confirm correctness, not used to select the parameters.
 
