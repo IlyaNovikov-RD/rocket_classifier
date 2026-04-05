@@ -380,6 +380,8 @@ make run              # inference pipeline → outputs/submission.csv
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 make pipeline         # download-all + run + interpret  (full end-to-end)
+make docker           # build + run Docker image → outputs/submission.csv
+make clean            # remove outputs/, cache/, models/ for a fresh cold start
 ```
 
 ### Docker
