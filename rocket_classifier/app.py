@@ -6,7 +6,7 @@ using a LightGBM model trained via GPU-accelerated Optuna + salvo consensus.
 
 Model: LightGBM (32 selected features — 25 kinematic + 7 salvo/group).
        Trained via research/train.py → 1.000000 OOB min-recall with
-       proximity consensus (0.999866 raw).
+       proximity consensus (0.999874 raw).
 
 Note on salvo/group features in the demo:
     The demo classifies a single synthetic trajectory in isolation.  The 7
