@@ -42,7 +42,13 @@ Achieved via **proximity-based salvo consensus**: all OOB misses were class-0 ro
 
 ## Domain Assumptions That Shaped the Solution
 
-Assumptions 1 and 2 (flat terrain, frictionless ballistic physics) establish that kinematic features are physically meaningful — altitude can be used directly, and velocity/acceleration/jerk faithfully encode the rocket's propulsion signature. Assumption 3 provides three business sub-assumptions from a domain expert, each directly driving a feature engineering decision.
+### 1 — Flat terrain
+No mountains or valleys — `z` is absolute altitude with no terrain correction required. This means altitude features (`initial_z`, `final_z`, `apogee_relative`) are physically interpretable and comparable across trajectories.
+
+### 2 — Frictionless ballistic physics
+Rockets follow standard ballistic flight after motor burnout. Under this assumption, vertical acceleration is constant at −g, and deviations from that encode thrust and drag. Kinematic features (velocity, acceleration, jerk) faithfully reflect the rocket's propulsion signature.
+
+Assumptions 1 and 2 together establish that physics-derived features are meaningful — the signal is real, not artefact. Assumption 3 provides three business sub-assumptions from a domain expert, each directly driving a feature engineering decision.
 
 ### 3a — Different launchers have different payload capacities
 Different launcher types can fire a different maximum number of rockets. This means the *largest* salvo ever observed from a rebel base reveals which launcher type they operate. Feature: `group_max_salvo_size`.
