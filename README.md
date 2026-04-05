@@ -433,7 +433,6 @@ tests/
 models/                        # Model artifacts — gitignored, from GitHub Release
 ├── model.onnx                  # ONNX format — fastest inference (run: make export-model)
 ├── model.lgb                   # Native LightGBM — present after training
-├── model.pkl                   # joblib LGBMClassifier — legacy fallback
 ├── train_medians.npy           # 32-feature NaN imputation medians
 └── threshold_biases.npy        # Per-class log-probability biases [0.000000, -0.253165, 1.265823]
 

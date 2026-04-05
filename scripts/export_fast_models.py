@@ -20,7 +20,6 @@ import time
 import warnings
 from pathlib import Path
 
-import joblib
 import lightgbm as lgb
 import numpy as np
 
@@ -29,31 +28,22 @@ warnings.filterwarnings("ignore")
 WEIGHTS_DIR = Path(__file__).parent.parent / "models"
 
 
-def _load_booster() -> tuple[object | None, object]:
-    """Load booster from model.lgb (preferred) or model.pkl (fallback).
+def _load_booster() -> object:
+    """Load booster from model.lgb.
 
-    Returns (clf_or_None, booster) — clf is None when loading from .lgb.
+    Returns the LightGBM Booster object.
     """
     lgb_path = WEIGHTS_DIR / "model.lgb"
-    pkl_path = WEIGHTS_DIR / "model.pkl"
 
     if lgb_path.exists():
         booster = lgb.Booster(model_file=str(lgb_path))
         n_features = len(booster.feature_name())
         n_trees = booster.num_trees()
         print(f"Loaded model.lgb: {n_trees} trees, {n_features} features, 3 classes")
-        return None, booster
-
-    if pkl_path.exists():
-        clf = joblib.load(str(pkl_path))
-        booster = clf.booster_
-        n_features = len(booster.feature_name())
-        n_trees = booster.num_trees()
-        print(f"Loaded model.pkl: {n_trees} trees, {n_features} features, 3 classes")
-        return clf, booster
+        return booster
 
     print(
-        "ERROR: neither model.lgb nor model.pkl found in models/.\nRun: make download-models",
+        "ERROR: model.lgb not found in models/.\nRun: make download-models",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -138,7 +128,7 @@ def _load_test_features() -> np.ndarray | None:
         return None
 
 
-def benchmark(clf: object | None, booster: object, X: np.ndarray) -> None:
+def benchmark(booster: object, X: np.ndarray) -> None:
     """Time all available inference backends on X and verify output agreement."""
     n, m = X.shape
     print(f"\nBenchmark: {n} samples x {m} features (min of 10 runs)")
@@ -146,22 +136,10 @@ def benchmark(clf: object | None, booster: object, X: np.ndarray) -> None:
 
     RUNS = 10
 
-    # Backend 1: sklearn wrapper (baseline) — only available if model.pkl was loaded
-    if clf is not None:
-        times = []
-        for _ in range(RUNS):
-            t0 = time.perf_counter()
-            p_sklearn = clf.predict_proba(X)  # type: ignore[union-attr]
-            times.append(time.perf_counter() - t0)
-        t_sk = min(times)
-        print(f"  sklearn wrapper   : {t_sk:.3f}s  (baseline)")
-    else:
-        p_sklearn = None
-        t_sk = None
-        print("  sklearn wrapper   : skipped (model.pkl not available)")
-
-    # Backend 2: native LightGBM booster
+    # Backend 1: native LightGBM booster (baseline)
     lgb_path = WEIGHTS_DIR / "model.lgb"
+    p_native = None
+    t_lgb = None
     if lgb_path.exists():
         native = lgb.Booster(model_file=str(lgb_path))
         times = []
@@ -170,14 +148,9 @@ def benchmark(clf: object | None, booster: object, X: np.ndarray) -> None:
             p_native = native.predict(X)
             times.append(time.perf_counter() - t0)
         t_lgb = min(times)
-        if t_sk is not None:
-            speedup = t_sk / t_lgb
-            print(f"  native LightGBM   : {t_lgb:.3f}s  ({speedup:.1f}x faster)")
-            np.testing.assert_allclose(p_sklearn, p_native, rtol=1e-4, atol=1e-5)
-        else:
-            print(f"  native LightGBM   : {t_lgb:.3f}s  (baseline)")
+        print(f"  native LightGBM   : {t_lgb:.3f}s  (baseline)")
 
-    # Backend 3: ONNX Runtime
+    # Backend 2: ONNX Runtime
     onnx_path = WEIGHTS_DIR / "model.onnx"
     if onnx_path.exists():
         try:
@@ -196,33 +169,21 @@ def benchmark(clf: object | None, booster: object, X: np.ndarray) -> None:
                 p_onnx = sess.run(["probabilities"], {inp: X})[0]
                 times.append(time.perf_counter() - t0)
             t_onnx = min(times)
-            t_baseline = t_sk if t_sk is not None else t_lgb  # type: ignore[possibly-undefined]
-            speedup = t_baseline / t_onnx
-            print(
-                f"  ONNX Runtime      : {t_onnx:.3f}s  ({speedup:.1f}x faster)  <- production default"
-            )
-            if p_sklearn is not None:
-                np.testing.assert_allclose(p_sklearn, p_onnx, rtol=1e-3, atol=1e-4)
+            if t_lgb is not None:
+                speedup = t_lgb / t_onnx
+                print(
+                    f"  ONNX Runtime      : {t_onnx:.3f}s  ({speedup:.1f}x faster)  <- production default"
+                )
+            else:
+                print(f"  ONNX Runtime      : {t_onnx:.3f}s  <- production default")
             biases = np.load(str(WEIGHTS_DIR / "threshold_biases.npy"))
-            p_ref = p_sklearn if p_sklearn is not None else p_native  # type: ignore[possibly-undefined]
-            preds_ref = np.argmax(np.log(p_ref + 1e-12) + biases, axis=1)
-            preds_on = np.argmax(np.log(p_onnx + 1e-12) + biases, axis=1)
-            diff = int(np.sum(preds_ref != preds_on))
-            print(f"  Prediction agreement (after bias): {n - diff}/{n} identical")
+            if p_native is not None:
+                preds_ref = np.argmax(np.log(p_native + 1e-12) + biases, axis=1)
+                preds_on = np.argmax(np.log(p_onnx + 1e-12) + biases, axis=1)
+                diff = int(np.sum(preds_ref != preds_on))
+                print(f"  Prediction agreement (after bias): {n - diff}/{n} identical")
         except ImportError:
             print("  ONNX Runtime      : skipped (pip install onnxruntime)")
-
-    # Model loading times
-    print()
-    print("Model loading (min of 3 runs):")
-    pkl_path_b = WEIGHTS_DIR / "model.pkl"
-    if pkl_path_b.exists():
-        times = []
-        for _ in range(3):
-            t0 = time.perf_counter()
-            joblib.load(str(pkl_path_b))
-            times.append(time.perf_counter() - t0)
-        print(f"  pkl  (joblib)     : {min(times):.3f}s")
 
     if lgb_path.exists():
         times = []
@@ -258,7 +219,7 @@ if __name__ == "__main__":
     print("EXPORT FAST MODELS")
     print("=" * 60)
 
-    clf, booster = _load_booster()
+    booster = _load_booster()
 
     print("\nExporting...")
     export_native_lgbm(booster)
@@ -266,7 +227,7 @@ if __name__ == "__main__":
 
     X = _load_test_features()
     if X is not None:
-        benchmark(clf, booster, X)
+        benchmark(booster, X)
     else:
         print(
             "\nSkipping benchmark — feature caches not found.\n"
