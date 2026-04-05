@@ -173,7 +173,10 @@ log = logging.getLogger("train")
 # Auto-detect working directory: Colab mounts files at /content/,
 # everywhere else use the current working directory (expected: project root).
 DATA_DIR = Path("/content") if Path("/content").exists() else Path(".")
-TRAIN_CSV = DATA_DIR / "train.csv"
+# train.csv can live at the root (Colab) or under data/ (local checkout).
+_root_csv = DATA_DIR / "train.csv"
+_data_csv = DATA_DIR / "data" / "train.csv"
+TRAIN_CSV = _root_csv if _root_csv.exists() else _data_csv
 # cache/ and models/ mirror the production directory structure exactly,
 # so artifacts land in the right place on both Colab and local runs.
 CACHE_DIR = DATA_DIR / "cache"
@@ -469,6 +472,9 @@ else:
     feats = feats[_cache_cols]
     log.info("Kinematic features computed and cached: %s", feats.shape)
 
+# Drop launch_time if the cache was built by the production pipeline (which
+# stores it), so the join below doesn't raise a column-overlap error.
+feats = feats.drop(columns=["launch_time"], errors="ignore")
 feats = feats.join(launch_meta.set_index("traj_ind")[["launch_time"]], how="left")
 
 # ── Salvo features — assumption 3b ────────────────────────────────────────────
