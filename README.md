@@ -377,6 +377,7 @@ make download-models # fetch artifacts/ from GitHub Release
 make download-all     # + cache/ parquet caches + data/ (test.csv, sample_submission.csv)
 make export-model     # convert model.lgb → model.onnx (run after model update)
 make run              # inference pipeline → output/submission.csv
+make train            # full training pipeline (Optuna + consensus → artifacts/)
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 make pipeline         # download-all + run + interpret  (full end-to-end)

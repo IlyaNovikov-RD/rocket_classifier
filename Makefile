@@ -13,6 +13,7 @@
 #   make download-models   Download model + medians + biases from GitHub Release
 #   make download-all      Download model artifacts + feature caches from GitHub Release
 #   make run               Run inference pipeline → submission.csv
+#   make train             Run full training pipeline (Optuna + consensus → artifacts/)
 #   make interpret         Regenerate SHAP plot + report after a new model is deployed
 #   make visualize         Regenerate demo.png (physics feature visualization)
 #   make pipeline          Full local pipeline: download-all → run → interpret
@@ -24,7 +25,7 @@
 #   make release TAG=v1.x.0 NOTES="..."      # upload all artifacts + trigger CI
 #   ONNX files are included in the release from the start (no download gap).
 
-.PHONY: install test lint format demo lock download-models download-all run interpret visualize pipeline export-model release docker clean
+.PHONY: install test lint format demo lock download-models download-all run train interpret visualize pipeline export-model release docker clean
 
 install:
 	uv sync --group dev
@@ -52,6 +53,10 @@ download-all:
 
 run:
 	uv run python -m rocket_classifier.main
+
+train:
+	uv sync --group research
+	uv run python research/train.py
 
 interpret:
 	uv sync --group research
