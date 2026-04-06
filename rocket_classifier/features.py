@@ -137,15 +137,23 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     feats["n_points"] = float(n_points)
 
     _NAN_VELOCITY = {
-        "vy_mean": np.nan, "vy_max": np.nan,
+        "vy_mean": np.nan,
+        "vy_max": np.nan,
         "vz_median": np.nan,
-        "v_horiz_std": np.nan, "v_horiz_median": np.nan,
-        "initial_speed": np.nan, "initial_vz": np.nan, "final_vz": np.nan,
+        "v_horiz_std": np.nan,
+        "v_horiz_median": np.nan,
+        "initial_speed": np.nan,
+        "initial_vz": np.nan,
+        "final_vz": np.nan,
     }
     _NAN_ACCELERATION = {
-        "acc_mag_mean": np.nan, "acc_mag_min": np.nan, "acc_mag_max": np.nan,
+        "acc_mag_mean": np.nan,
+        "acc_mag_min": np.nan,
+        "acc_mag_max": np.nan,
         "az_std": np.nan,
-        "acc_horiz_std": np.nan, "acc_horiz_min": np.nan, "acc_horiz_max": np.nan,
+        "acc_horiz_std": np.nan,
+        "acc_horiz_min": np.nan,
+        "acc_horiz_max": np.nan,
         "mean_az": np.nan,
     }
 
@@ -153,8 +161,14 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
         feats.update(_NAN_VELOCITY)
         feats.update(_NAN_ACCELERATION)
         for k in [
-            "initial_z", "final_z", "delta_z_total", "apogee_relative",
-            "x_range", "y_range", "launch_x", "launch_y",
+            "initial_z",
+            "final_z",
+            "delta_z_total",
+            "apogee_relative",
+            "x_range",
+            "y_range",
+            "launch_x",
+            "launch_y",
         ]:
             feats[k] = np.nan
         return feats

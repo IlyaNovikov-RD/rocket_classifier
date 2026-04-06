@@ -214,7 +214,9 @@ class RocketClassifier:
         model: object
         backend_name: str
 
-        _onnx_candidate = onnx_opt_path if onnx_opt_path.exists() else onnx_path if onnx_path.exists() else None
+        _onnx_candidate = (
+            onnx_opt_path if onnx_opt_path.exists() else onnx_path if onnx_path.exists() else None
+        )
         if _onnx_candidate is not None and _ort is not None:
             try:
                 ort = _ort  # already imported at module level

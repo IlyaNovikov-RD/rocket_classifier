@@ -109,7 +109,7 @@ def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.Dat
 # Proximity consensus helpers (pure functions — no I/O, testable)
 # ---------------------------------------------------------------------------
 
-_PROX_POS_PRECISION = 2   # decimal places for rounding launch_x / launch_y
+_PROX_POS_PRECISION = 2  # decimal places for rounding launch_x / launch_y
 _PROX_TIME_WINDOW_S = 60  # max total span (s) of a salvo group
 
 
@@ -298,8 +298,10 @@ def main() -> None:
     if "launch_time" in test_feats.columns:
         _launch_lt_s = test_feats["launch_time"].astype(np.int64) / 1e9
     else:
-        _ts_src = test_raw if test_raw is not None else pd.read_csv(
-            DATA_DIR / "test.csv", usecols=["traj_ind", "time_stamp"]
+        _ts_src = (
+            test_raw
+            if test_raw is not None
+            else pd.read_csv(DATA_DIR / "test.csv", usecols=["traj_ind", "time_stamp"])
         )
         _ts_src = _ts_src.copy()
         _ts_src["time_stamp"] = pd.to_datetime(_ts_src["time_stamp"], format="mixed")
@@ -307,7 +309,8 @@ def main() -> None:
             _ts_src.groupby("traj_ind")["time_stamp"]
             .min()
             .reindex(test_feats.index)
-            .astype(np.int64) / 1e9
+            .astype(np.int64)
+            / 1e9
         )
 
     _group_ids = build_proximity_groups(

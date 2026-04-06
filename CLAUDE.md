@@ -5,23 +5,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run Commands
 
 ```bash
+# Setup
 make install          # uv sync --group dev — install all dependencies
 make lock             # uv lock — regenerate uv.lock from pyproject.toml
-make test             # uv run pytest tests/ -v
+make clean            # remove output/, cache/, artifacts/ for a fresh cold start
+# Quality
 make lint             # uv run ruff check .
 make format           # uv run ruff format .
-make download-models # fetch model artifacts from latest GitHub Release into artifacts/
+make test             # uv run pytest tests/ -v
+# Data
+make download-models  # fetch model artifacts from latest GitHub Release into artifacts/
 make download-all     # + feature caches into cache/ + test.csv/sample_submission.csv into data/
+# Training
+make train            # full training pipeline (Optuna + consensus → artifacts/)
+make export-model     # convert model.lgb → model.onnx + model_opt.onnx (requires onnxmltools)
+# Inference
 make run              # inference pipeline → output/submission.csv
 make pipeline         # download-all + run + interpret (full end-to-end)
-make demo             # launch Streamlit app (localhost:8501)
-make train            # full training pipeline (Optuna + consensus → artifacts/)
+# Analysis
 make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
-make export-model     # convert model.lgb → model.onnx + model_opt.onnx (required before release; requires onnxmltools)
+# Deploy
 make docker           # build + run Docker image → output/submission.csv
-make clean            # remove output/, cache/, artifacts/ for a fresh cold start
-make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts (ONNX required)
+make demo             # launch Streamlit app (localhost:8501)
+make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts
 ```
 
 Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_perfect_predictions -v`
