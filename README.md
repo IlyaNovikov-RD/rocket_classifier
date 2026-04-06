@@ -367,39 +367,41 @@ make demo            # streamlit demo (localhost:8501)
 ### Make Targets
 
 ```bash
-# Setup
+# Setup                                          ~1s
 make install          # uv sync --group dev
 make lock             # uv lock — regenerate uv.lock from pyproject.toml
 make clean            # remove output/, cache/, artifacts/ for a fresh cold start
 
-# Quality
+# Quality                                        ~16s
 make lint             # ruff check
 make format           # ruff format
-make test             # unit tests
+make test             # unit tests (104 tests)
 
-# Training
+# Training                                       ~15 min
 make train            # full training pipeline (Optuna + consensus → artifacts/)
-make export-model     # convert model.lgb → model.onnx (run after model update)
+make export-model     # convert model.lgb → model.onnx (~48s)
 
-# Inference
+# Inference                                      ~2.5 min
 make run              # inference pipeline → output/submission.csv
 
-# Analysis
-make interpret        # regenerate SHAP assets after model update
-make visualize        # regenerate assets/demo.png after feature changes
+# Analysis                                       ~1 min
+make interpret        # regenerate SHAP assets after model update (~60s)
+make visualize        # regenerate assets/demo.png (~3s)
 
-# Deploy
+# Deploy                                         ~9 min first build
 make docker           # build + run Docker image → output/submission.csv
 make demo             # streamlit demo (localhost:8501)
 
-# Data (download pre-built artifacts instead of training)
+# Data (download pre-built artifacts instead of training)  ~30s
 make download-models  # fetch artifacts/ from GitHub Release
 make download-all     # + cache/ parquet caches + data/ (test.csv, sample_submission.csv)
-make pipeline         # download-all + run + interpret (full end-to-end)
+make pipeline         # download-all + run + interpret (full end-to-end, ~1.5 min)
 
 # Release
 make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts
 ```
+
+> Runtimes measured on Windows 11, 4-core CPU, 6 GB RAM. Training and Docker vary by hardware.
 
 ### Docker
 
