@@ -17,95 +17,95 @@ TOP 20 MOST INFLUENTIAL FEATURES
 ------------------------------------------------------------------------
 Rank  Feature                         Mean |SHAP|
 ------------------------------------------------------------------------
-1     initial_z                          2.958721
-2     v_horiz_median                     1.438231
-3     launch_x                           1.402670
-4     acc_horiz_min                      0.855573
-5     launch_y                           0.756599
-6     apogee_relative                    0.727806
-7     final_z                            0.624961
-8     n_points                           0.331914
-9     initial_speed                      0.314045
-10    vy_mean                            0.307150
-11    delta_z_total                      0.278285
-12    salvo_time_rank                    0.232758
-13    final_vz                           0.198471
-14    initial_vz                         0.145688
-15    y_range                            0.139029
-16    vy_max                             0.138274
-17    x_range                            0.127932
-18    acc_mag_min                        0.117378
-19    v_horiz_std                        0.113511
-20    vz_median                          0.107261
+1     initial_z                          2.008138
+2     launch_x                           1.312977
+3     v_horiz_median                     0.979804
+4     final_z                            0.582288
+5     launch_y                           0.561508
+6     acc_horiz_min                      0.555435
+7     apogee_relative                    0.349784
+8     delta_z_total                      0.314699
+9     n_points                           0.210001
+10    initial_speed                      0.174438
+11    vy_mean                            0.145389
+12    salvo_time_rank                    0.092665
+13    x_range                            0.089801
+14    initial_vz                         0.082210
+15    vz_median                          0.077413
+16    final_vz                           0.077015
+17    y_range                            0.069558
+18    vy_max                             0.051299
+19    acc_mag_min                        0.048489
+20    v_horiz_std                        0.037747
 
 PHYSICAL INTERPRETATION OF TOP FEATURES
 ------------------------------------------------------------------------
 
-[INITIAL_Z]  (mean |SHAP| of top member: 2.958721)
+[INITIAL_Z]  (mean |SHAP| of top member: 2.008138)
   Initial Altitude — launch site elevation.
 
-[V_HORIZ]  (mean |SHAP| of top member: 1.438231)
+[LAUNCH_X]  (mean |SHAP| of top member: 1.312977)
+  Launch X Coordinate — launcher position; clusters by rebel group.
+
+[V_HORIZ]  (mean |SHAP| of top member: 0.979804)
   Horizontal Speed — range capability; longer-range rockets fly faster
   horizontally.
 
-[LAUNCH_X]  (mean |SHAP| of top member: 1.402670)
-  Launch X Coordinate — launcher position; clusters by rebel group.
+[FINAL_Z]  (mean |SHAP| of top member: 0.582288)
+  Final Altitude — altitude at last radar contact.
 
-[ACC_HORIZ]  (mean |SHAP| of top member: 0.855573)
+[LAUNCH_Y]  (mean |SHAP| of top member: 0.561508)
+  Launch Y Coordinate — launcher position; clusters by rebel group.
+
+[ACC_HORIZ]  (mean |SHAP| of top member: 0.555435)
   Horizontal Acceleration — lateral manoeuvring capability; unguided
   rockets show near-zero horizontal acceleration.
 
-[LAUNCH_Y]  (mean |SHAP| of top member: 0.756599)
-  Launch Y Coordinate — launcher position; clusters by rebel group.
-
-[APOGEE_RELATIVE]  (mean |SHAP| of top member: 0.727806)
+[APOGEE_RELATIVE]  (mean |SHAP| of top member: 0.349784)
   Apogee Rise — altitude gained above launch point; normalises for
   varying launch elevations.
 
-[FINAL_Z]  (mean |SHAP| of top member: 0.624961)
-  Final Altitude — altitude at last radar contact.
-
-[N_POINTS]  (mean |SHAP| of top member: 0.331914)
-  Point Count — number of radar returns; denser sampling improves
-  feature quality but is also radar-type dependent.
-
-[INITIAL_SPEED]  (mean |SHAP| of top member: 0.314045)
-  Initial Speed — muzzle velocity; tightly controlled by propellant
-  charge, highly class-discriminative.
-
-[VY]  (mean |SHAP| of top member: 0.307150)
-  Y-axis Velocity Component — heading vector element.
-
-[DELTA_Z_TOTAL]  (mean |SHAP| of top member: 0.278285)
+[DELTA_Z_TOTAL]  (mean |SHAP| of top member: 0.314699)
   Net Altitude Change — positive = still ascending, negative =
   landed/descending.
 
-[SALVO_TIME_RANK]  (mean |SHAP| of top member: 0.232758)
+[N_POINTS]  (mean |SHAP| of top member: 0.210001)
+  Point Count — number of radar returns; denser sampling improves
+  feature quality but is also radar-type dependent.
+
+[INITIAL_SPEED]  (mean |SHAP| of top member: 0.174438)
+  Initial Speed — muzzle velocity; tightly controlled by propellant
+  charge, highly class-discriminative.
+
+[VY]  (mean |SHAP| of top member: 0.145389)
+  Y-axis Velocity Component — heading vector element.
+
+[SALVO_TIME_RANK]  (mean |SHAP| of top member: 0.092665)
   Salvo Time Rank — this rocket's launch order within its salvo
   (assumption 3b). Later-fired rockets carry a kinematic imprint from
   preceding launches.
 
-[FINAL_VZ]  (mean |SHAP| of top member: 0.198471)
-  Terminal Vertical Velocity — negative = descending; magnitude encodes
-  steepness.
+[X_RANGE]  (mean |SHAP| of top member: 0.089801)
+  X-axis Spatial Extent — bounding box dimension.
 
-[INITIAL_VZ]  (mean |SHAP| of top member: 0.145688)
+[INITIAL_VZ]  (mean |SHAP| of top member: 0.082210)
   Initial Vertical Velocity — determines apogee independently of
   azimuth.
 
-[Y_RANGE]  (mean |SHAP| of top member: 0.139029)
-  Y-axis Spatial Extent — bounding box dimension.
-
-[X_RANGE]  (mean |SHAP| of top member: 0.127932)
-  X-axis Spatial Extent — bounding box dimension.
-
-[ACC_MAG]  (mean |SHAP| of top member: 0.117378)
-  3D Acceleration Magnitude — captures the net force profile; heavier
-  rockets show lower peak acceleration for the same thrust.
-
-[VZ]  (mean |SHAP| of top member: 0.107261)
+[VZ]  (mean |SHAP| of top member: 0.077413)
   Vertical Velocity Component — controls apogee height and time-of-
   flight.
+
+[FINAL_VZ]  (mean |SHAP| of top member: 0.077015)
+  Terminal Vertical Velocity — negative = descending; magnitude encodes
+  steepness.
+
+[Y_RANGE]  (mean |SHAP| of top member: 0.069558)
+  Y-axis Spatial Extent — bounding box dimension.
+
+[ACC_MAG]  (mean |SHAP| of top member: 0.048489)
+  3D Acceleration Magnitude — captures the net force profile; heavier
+  rockets show lower peak acceleration for the same thrust.
 
 ========================================================================
 KEY FINDING

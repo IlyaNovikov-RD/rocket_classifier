@@ -26,6 +26,7 @@ from rocket_classifier.main import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_series(traj_inds: list[int], values: list[float]) -> pd.Series:
     return pd.Series(values, index=pd.Index(traj_inds, name="traj_ind"))
 
@@ -33,6 +34,7 @@ def _make_series(traj_inds: list[int], values: list[float]) -> pd.Series:
 # ---------------------------------------------------------------------------
 # build_proximity_groups
 # ---------------------------------------------------------------------------
+
 
 class TestBuildProximityGroups:
     def test_same_position_close_time_same_group(self) -> None:
@@ -72,9 +74,9 @@ class TestBuildProximityGroups:
         groups = build_proximity_groups(lx, ly, lt)
 
         # Absolute-span: group restarts whenever t - group_start > window
-        assert groups[0] == groups[1]    # span = gap <= window → same group
-        assert groups[2] != groups[0]    # span = gap*2 > window → new group
-        assert groups[3] != groups[0]    # span = gap*3 > window → yet another group
+        assert groups[0] == groups[1]  # span = gap <= window → same group
+        assert groups[2] != groups[0]  # span = gap*2 > window → new group
+        assert groups[3] != groups[0]  # span = gap*3 > window → yet another group
 
     def test_different_positions_different_groups(self) -> None:
         """Rockets at different positions are never in the same group."""
@@ -114,6 +116,7 @@ class TestBuildProximityGroups:
 # ---------------------------------------------------------------------------
 # apply_salvo_consensus
 # ---------------------------------------------------------------------------
+
 
 class TestApplySalvoConsensus:
     def test_strict_majority_corrects_miss(self) -> None:

@@ -158,6 +158,7 @@ except ImportError:
         ]
         return float(np.min(recalls))
 
+
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 warnings.filterwarnings("ignore")
 
@@ -182,7 +183,7 @@ FEATURE_CACHE = CACHE_DIR / "cache_train_features.parquet"
 
 N_CLASSES = 3
 N_SPLITS = 10
-N_TRIALS = 100        # upper bound; stops early once post-consensus OOB hits 1.0
+N_TRIALS = 100  # upper bound; stops early once post-consensus OOB hits 1.0
 RANDOM_SEED = 42
 
 # DBSCAN for salvo + rebel-group features (assumption 3b/3c).
@@ -194,7 +195,7 @@ GROUP_EPS, GROUP_MIN_SAMPLES = 0.25, 3
 # Rockets in a salvo share the same launcher: dist ≈ 0, dt < a few seconds.
 # These thresholds are conservative upper bounds validated on training data
 # (group purity = 100%, n_broken = 0).
-PROX_POS_PRECISION = 2   # decimal places for rounding launch_x / launch_y
+PROX_POS_PRECISION = 2  # decimal places for rounding launch_x / launch_y
 PROX_TIME_WINDOW_S = 60  # max total span (s) of a salvo group
 
 
@@ -205,21 +206,43 @@ SELECTED_FEATURES: list[str] = [
     # Finite-difference velocity/acceleration/jerk statistics derived from
     # raw (x, y, z, time_stamp) pings under flat-terrain + ballistic physics.
     "n_points",
-    "vy_mean", "vy_max", "vz_median",
-    "v_horiz_std", "v_horiz_median",
-    "initial_speed", "initial_vz", "final_vz",
-    "acc_mag_mean", "acc_mag_min", "acc_mag_max",
-    "az_std", "acc_horiz_std", "acc_horiz_min", "acc_horiz_max", "mean_az",
-    "initial_z", "final_z", "delta_z_total", "apogee_relative",
-    "x_range", "y_range", "launch_x", "launch_y",
+    "vy_mean",
+    "vy_max",
+    "vz_median",
+    "v_horiz_std",
+    "v_horiz_median",
+    "initial_speed",
+    "initial_vz",
+    "final_vz",
+    "acc_mag_mean",
+    "acc_mag_min",
+    "acc_mag_max",
+    "az_std",
+    "acc_horiz_std",
+    "acc_horiz_min",
+    "acc_horiz_max",
+    "mean_az",
+    "initial_z",
+    "final_z",
+    "delta_z_total",
+    "apogee_relative",
+    "x_range",
+    "y_range",
+    "launch_x",
+    "launch_y",
     # ── Salvo (4) — assumption 3b ──────────────────────────────────────────────
     # Spatiotemporal DBSCAN on (launch_x, launch_y, launch_time_s) groups
     # rockets fired together into salvos.
-    "salvo_size", "salvo_duration_s", "salvo_spatial_spread_m", "salvo_time_rank",
+    "salvo_size",
+    "salvo_duration_s",
+    "salvo_spatial_spread_m",
+    "salvo_time_rank",
     # ── Rebel-group (3) — assumptions 3a & 3c ─────────────────────────────────
     # Pure-spatial DBSCAN on (launch_x, launch_y) identifies persistent rebel
     # bases; each group purchases one rocket type independently.
-    "group_total_rockets", "group_n_salvos", "group_max_salvo_size",
+    "group_total_rockets",
+    "group_n_salvos",
+    "group_max_salvo_size",
 ]
 
 try:
@@ -233,8 +256,13 @@ log.info("Device: %s | CPU cores: %d", DEVICE, N_JOBS)
 # ── Utilities ──────────────────────────────────────────────────────────────────
 # min_class_recall imported from rocket_classifier.model — single source of truth.
 
+
 def optimize_thresholds(
-    y: np.ndarray, proba: np.ndarray, g1: int = 80, g2: int = 50, g3: int = 30,
+    y: np.ndarray,
+    proba: np.ndarray,
+    g1: int = 80,
+    g2: int = 50,
+    g3: int = 30,
 ) -> tuple[np.ndarray, float]:
     """Coarse → fine → ultra-fine grid search over log-probability biases."""
     lp = np.log(proba + 1e-12)
@@ -261,7 +289,8 @@ def optimize_thresholds(
 
 
 def compute_group_priors(
-    group_ids: np.ndarray, y: np.ndarray,
+    group_ids: np.ndarray,
+    y: np.ndarray,
 ) -> tuple[dict[int, np.ndarray], np.ndarray]:
     gp = np.array([(y == c).mean() for c in range(N_CLASSES)], dtype=np.float32)
     priors: dict[int, np.ndarray] = {}
@@ -269,14 +298,17 @@ def compute_group_priors(
         mask = group_ids == g
         priors[int(g)] = (
             np.array([(y[mask] == c).mean() for c in range(N_CLASSES)], dtype=np.float32)
-            if mask.sum() >= 3 else gp.copy()
+            if mask.sum() >= 3
+            else gp.copy()
         )
     return priors, gp
 
 
 def append_group_priors(
-    X: np.ndarray, group_ids: np.ndarray,
-    priors: dict[int, np.ndarray], gp: np.ndarray,
+    X: np.ndarray,
+    group_ids: np.ndarray,
+    priors: dict[int, np.ndarray],
+    gp: np.ndarray,
 ) -> np.ndarray:
     cols = np.array([priors.get(int(g), gp) for g in group_ids], dtype=np.float32)
     return np.concatenate([X, cols], axis=1)
@@ -287,7 +319,8 @@ def append_group_priors(
 
 
 def _compute_derivatives(
-    pos: np.ndarray, dt: np.ndarray,
+    pos: np.ndarray,
+    dt: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     vel = np.diff(pos, axis=0) / dt[:, np.newaxis]
     if vel.shape[0] < 2:
@@ -339,7 +372,7 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict:
         feats.update(_safe_stats(vz, "vz"))
         feats.update(_safe_stats(v_horiz, "v_horiz"))
         feats["launch_angle_elev"] = (
-            float(np.arctan2(vz[0], np.sqrt(vx[0]**2 + vy[0]**2))) if speed[0] > 0 else np.nan
+            float(np.arctan2(vz[0], np.sqrt(vx[0] ** 2 + vy[0] ** 2))) if speed[0] > 0 else np.nan
         )
         feats["launch_angle_azimuth"] = float(np.arctan2(vy[0], vx[0])) if speed[0] > 0 else np.nan
         feats["initial_speed"] = float(speed[0])
@@ -356,24 +389,48 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict:
             feats["mean_az"] = float(np.mean(az_arr))
         else:
             for k in [
-                "acc_mag_mean", "acc_mag_std", "acc_mag_min", "acc_mag_max", "acc_mag_median",
-                "az_mean", "az_std", "az_min", "az_max", "az_median",
-                "acc_horiz_mean", "acc_horiz_std", "acc_horiz_min", "acc_horiz_max",
-                "acc_horiz_median", "mean_az",
+                "acc_mag_mean",
+                "acc_mag_std",
+                "acc_mag_min",
+                "acc_mag_max",
+                "acc_mag_median",
+                "az_mean",
+                "az_std",
+                "az_min",
+                "az_max",
+                "az_median",
+                "acc_horiz_mean",
+                "acc_horiz_std",
+                "acc_horiz_min",
+                "acc_horiz_max",
+                "acc_horiz_median",
+                "mean_az",
             ]:
                 feats[k] = np.nan
         if jerk.shape[0] > 0:
             feats.update(_safe_stats(np.linalg.norm(jerk, axis=1), "jerk_mag"))
         else:
-            for k in ["jerk_mag_mean", "jerk_mag_std", "jerk_mag_min", "jerk_mag_max", "jerk_mag_median"]:
+            for k in [
+                "jerk_mag_mean",
+                "jerk_mag_std",
+                "jerk_mag_min",
+                "jerk_mag_max",
+                "jerk_mag_median",
+            ]:
                 feats[k] = np.nan
     else:
         for pfx in ["speed", "vx", "vy", "vz", "v_horiz", "acc_mag", "az", "acc_horiz", "jerk_mag"]:
             for s in ["mean", "std", "min", "max", "median"]:
                 feats[f"{pfx}_{s}"] = np.nan
         for k in [
-            "launch_angle_elev", "launch_angle_azimuth", "initial_speed", "initial_vz",
-            "initial_v_horiz", "final_speed", "final_vz", "mean_az",
+            "launch_angle_elev",
+            "launch_angle_azimuth",
+            "initial_speed",
+            "initial_vz",
+            "initial_v_horiz",
+            "final_speed",
+            "final_vz",
+            "mean_az",
         ]:
             feats[k] = np.nan
 
@@ -391,7 +448,7 @@ def _extract_trajectory_features(group: pd.DataFrame) -> dict:
     feats["x_range"] = float(np.ptp(pos[:, 0]))
     feats["y_range"] = float(np.ptp(pos[:, 1]))
     feats["z_range"] = float(np.ptp(pos[:, 2]))
-    xy_disp = np.sqrt((pos[:, 0] - pos[0, 0])**2 + (pos[:, 1] - pos[0, 1])**2)
+    xy_disp = np.sqrt((pos[:, 0] - pos[0, 0]) ** 2 + (pos[:, 1] - pos[0, 1]) ** 2)
     feats["max_horiz_range"] = float(np.max(xy_disp))
     feats["final_horiz_range"] = float(xy_disp[-1])
     feats["path_length_3d"] = (
@@ -446,10 +503,17 @@ log.info(
 # fresh from DBSCAN below and are never stored in the cache — only the 25
 # kinematic features actually used are cached (shortest path).
 _KINEMATIC_FEATURES = [
-    f for f in SELECTED_FEATURES
-    if f not in {
-        "salvo_size", "salvo_duration_s", "salvo_spatial_spread_m", "salvo_time_rank",
-        "group_total_rockets", "group_n_salvos", "group_max_salvo_size",
+    f
+    for f in SELECTED_FEATURES
+    if f
+    not in {
+        "salvo_size",
+        "salvo_duration_s",
+        "salvo_spatial_spread_m",
+        "salvo_time_rank",
+        "group_total_rockets",
+        "group_n_salvos",
+        "group_max_salvo_size",
     }
 ]
 
@@ -477,11 +541,13 @@ feats = feats.join(launch_meta.set_index("traj_ind")[["launch_time"]], how="left
 # DBSCAN on StandardScaler-normalised (launch_x, launch_y, launch_time_s)
 # identifies these clusters. Noise points (label=-1) each become their own
 # singleton salvo so every trajectory has a valid salvo_size ≥ 1.
-ci = pd.DataFrame({
-    "launch_x": feats["launch_x"],
-    "launch_y": feats["launch_y"],
-    "launch_time_s": feats["launch_time"].astype(np.int64) / 1e9,
-}).fillna(0.0)
+ci = pd.DataFrame(
+    {
+        "launch_x": feats["launch_x"],
+        "launch_y": feats["launch_y"],
+        "launch_time_s": feats["launch_time"].astype(np.int64) / 1e9,
+    }
+).fillna(0.0)
 raw_salvo = DBSCAN(eps=SALVO_EPS, min_samples=SALVO_MIN_SAMPLES, n_jobs=-1).fit_predict(
     StandardScaler().fit_transform(ci)
 )
@@ -492,8 +558,11 @@ for i in range(len(salvo_ids)):
         salvo_ids[i] = next_id
         next_id += 1
 feats["salvo_id"] = salvo_ids
-log.info("Salvos: %d identified | noise: %d",
-         len(set(raw_salvo[raw_salvo >= 0])), (raw_salvo == -1).sum())
+log.info(
+    "Salvos: %d identified | noise: %d",
+    len(set(raw_salvo[raw_salvo >= 0])),
+    (raw_salvo == -1).sum(),
+)
 
 salvo_rows = []
 for _sid, grp in feats.groupby("salvo_id"):
@@ -508,16 +577,18 @@ for _sid, grp in feats.groupby("salvo_id"):
             dy = ly[:, None] - ly[None, :]
             spread = float(np.sqrt(dx**2 + dy**2).max())
         else:
-            spread = float(np.sqrt((lx.max() - lx.min())**2 + (ly.max() - ly.min())**2))
+            spread = float(np.sqrt((lx.max() - lx.min()) ** 2 + (ly.max() - ly.min()) ** 2))
     ranks = pd.Series(lt).rank(method="first").astype(int).values
     for i, tid in enumerate(grp.index):
-        salvo_rows.append({
-            "traj_ind": tid,
-            "salvo_size": n,
-            "salvo_duration_s": dur,
-            "salvo_spatial_spread_m": spread,
-            "salvo_time_rank": int(ranks[i]),
-        })
+        salvo_rows.append(
+            {
+                "traj_ind": tid,
+                "salvo_size": n,
+                "salvo_duration_s": dur,
+                "salvo_spatial_spread_m": spread,
+                "salvo_time_rank": int(ranks[i]),
+            }
+        )
 _salvo_cols = ["salvo_size", "salvo_duration_s", "salvo_spatial_spread_m", "salvo_time_rank"]
 feats = feats.drop(columns=[c for c in _salvo_cols if c in feats.columns])
 feats = feats.join(pd.DataFrame(salvo_rows).set_index("traj_ind"), how="left")
@@ -562,16 +633,25 @@ if "label" not in feats.columns:
 multi_mask = feats["salvo_size"] > 1
 if multi_mask.sum() > 0:
     purity = (
-        feats[multi_mask].groupby("salvo_id")["label"]
+        feats[multi_mask]
+        .groupby("salvo_id")["label"]
         .apply(lambda g: (g == g.mode().iloc[0]).mean())
     )
-    log.info("Salvo class purity: mean=%.3f  fully_pure=%.1f%%",
-             purity.mean(), (purity == 1.0).mean() * 100)
+    log.info(
+        "Salvo class purity: mean=%.3f  fully_pure=%.1f%%",
+        purity.mean(),
+        (purity == 1.0).mean() * 100,
+    )
 
 y = feats["label"].to_numpy(dtype=np.int32)
 groups = feats.index.to_numpy()
-log.info("Feature matrix: %s | Classes: 0=%d  1=%d  2=%d",
-         feats[SELECTED_FEATURES].shape, (y == 0).sum(), (y == 1).sum(), (y == 2).sum())
+log.info(
+    "Feature matrix: %s | Classes: 0=%d  1=%d  2=%d",
+    feats[SELECTED_FEATURES].shape,
+    (y == 0).sum(),
+    (y == 1).sum(),
+    (y == 2).sum(),
+)
 
 # ── Proximity consensus groups — assumptions 3b & 3c ──────────────────────────
 # Chain of reasoning:
@@ -618,8 +698,9 @@ multi_prox = np.isin(prox_group_ids, prox_sizes[prox_sizes >= 2].index)
 if multi_prox.sum() > 0:
     pur_df = pd.DataFrame({"gid": prox_group_ids[multi_prox], "label": y[multi_prox]})
     pur = pur_df.groupby("gid")["label"].apply(lambda g: (g == g.mode().iloc[0]).mean())
-    log.info("Group class purity: mean=%.3f  fully_pure=%.1f%%",
-             pur.mean(), (pur == 1.0).mean() * 100)
+    log.info(
+        "Group class purity: mean=%.3f  fully_pure=%.1f%%", pur.mean(), (pur == 1.0).mean() * 100
+    )
     if pur.mean() < 0.95:
         log.warning("LOW PURITY — consensus may introduce errors.")
 
@@ -664,9 +745,14 @@ def run_oob(params: dict) -> np.ndarray:
         X_tr = append_group_priors(X_tr, g_tr, priors, gp)
         X_val = append_group_priors(X_val, g_val, priors, gp)
         mdl = LGBMClassifier(
-            **params, objective="multiclass", num_class=N_CLASSES,
-            device=DEVICE, gpu_use_dp=False, n_jobs=N_JOBS,
-            random_state=RANDOM_SEED, verbose=-1,
+            **params,
+            objective="multiclass",
+            num_class=N_CLASSES,
+            device=DEVICE,
+            gpu_use_dp=False,
+            n_jobs=N_JOBS,
+            random_state=RANDOM_SEED,
+            verbose=-1,
         )
         mdl.fit(X_tr, y_tr)
         oob_proba[val_idx] += mdl.predict_proba(X_val)
@@ -757,12 +843,11 @@ n_corrected = int(((preds_raw != y) & (preds_consensus == y)).sum())
 n_broken = int(((preds_raw == y) & (preds_consensus != y)).sum())
 
 log.info("Biases: %s", biases.tolist())
-log.info("Score BEFORE consensus : %.6f  (%d misses)",
-         score_raw, int((preds_raw != y).sum()))
-log.info("Score AFTER  consensus : %.6f  (%d misses)",
-         score_consensus, int((preds_consensus != y).sum()))
-log.info("Predictions changed    : %d  (corrected=%d  broken=%d)",
-         n_changed, n_corrected, n_broken)
+log.info("Score BEFORE consensus : %.6f  (%d misses)", score_raw, int((preds_raw != y).sum()))
+log.info(
+    "Score AFTER  consensus : %.6f  (%d misses)", score_consensus, int((preds_consensus != y).sum())
+)
+log.info("Predictions changed    : %d  (corrected=%d  broken=%d)", n_changed, n_corrected, n_broken)
 
 # Verify Stage 2 scores match what Optuna recorded (should always agree —
 # OOB is deterministic with fixed seed).
@@ -772,22 +857,32 @@ if abs(score_raw - optuna_raw) > 1e-8 or abs(score_consensus - optuna_consensus)
     log.warning(
         "Score mismatch between Optuna (raw=%.6f, consensus=%.6f) and "
         "Stage 2 (raw=%.6f, consensus=%.6f) — using Stage 2 values.",
-        optuna_raw, optuna_consensus, score_raw, score_consensus,
+        optuna_raw,
+        optuna_consensus,
+        score_raw,
+        score_consensus,
     )
 
 log.info("")
 log.info("=" * 70)
 if score_consensus >= 1.0:
-    log.info("[PASS]  1.000000 achieved. Consensus corrected %d miss(es), broke %d.",
-             n_corrected, n_broken)
+    log.info(
+        "[PASS]  1.000000 achieved. Consensus corrected %d miss(es), broke %d.",
+        n_corrected,
+        n_broken,
+    )
 else:
-    log.info("[INFO]  Post-consensus score: %.6f. Gap: %.2e",
-             score_consensus, 1.0 - score_consensus)
+    log.info(
+        "[INFO]  Post-consensus score: %.6f. Gap: %.2e", score_consensus, 1.0 - score_consensus
+    )
     if (preds_consensus != y).sum() > 0:
         for tid in feats.index[preds_consensus != y]:
-            log.info("  Remaining miss: traj_ind=%d  true=%d  pred=%d",
-                     tid, int(feats.loc[tid, "label"]),
-                     int(preds_consensus[feats.index.get_loc(tid)]))
+            log.info(
+                "  Remaining miss: traj_ind=%d  true=%d  pred=%d",
+                tid,
+                int(feats.loc[tid, "label"]),
+                int(preds_consensus[feats.index.get_loc(tid)]),
+            )
 log.info("=" * 70)
 
 # ── Stage 3: Train production model on full data ───────────────────────────────
@@ -816,9 +911,14 @@ prior_cols = append_group_priors(X32_imp, rebel_group_col, priors_full, gp_full)
 X35 = prior_cols  # shape (N, 35)
 
 final_model = LGBMClassifier(
-    **best_params, objective="multiclass", num_class=N_CLASSES,
-    device=DEVICE, gpu_use_dp=False, n_jobs=N_JOBS,
-    random_state=RANDOM_SEED, verbose=-1,
+    **best_params,
+    objective="multiclass",
+    num_class=N_CLASSES,
+    device=DEVICE,
+    gpu_use_dp=False,
+    n_jobs=N_JOBS,
+    random_state=RANDOM_SEED,
+    verbose=-1,
 )
 final_model.fit(X35, y)
 log.info("Trained on full dataset. Trees: %d", final_model.booster_.num_trees())

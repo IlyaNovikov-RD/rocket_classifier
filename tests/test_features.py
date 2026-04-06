@@ -530,25 +530,29 @@ class TestBuildFeatures:
         # Cluster A: 5 trajectories near (0, 0), close in time
         for traj_id in range(5):
             for i in range(4):
-                rows.append({
-                    "traj_ind": traj_id,
-                    "time_stamp": f"2024-01-01 00:00:0{i}.{traj_id:06d}",
-                    "x": float(i) + traj_id * 0.001,
-                    "y": traj_id * 0.001,
-                    "z": float(i) * 0.5,
-                    "label": 0,
-                })
+                rows.append(
+                    {
+                        "traj_ind": traj_id,
+                        "time_stamp": f"2024-01-01 00:00:0{i}.{traj_id:06d}",
+                        "x": float(i) + traj_id * 0.001,
+                        "y": traj_id * 0.001,
+                        "z": float(i) * 0.5,
+                        "label": 0,
+                    }
+                )
         # Cluster B: 5 trajectories near (1000, 1000), close in time
         for traj_id in range(5, 10):
             for i in range(4):
-                rows.append({
-                    "traj_ind": traj_id,
-                    "time_stamp": f"2024-01-01 00:00:0{i}.{traj_id:06d}",
-                    "x": 1000.0 + float(i) + (traj_id - 5) * 0.001,
-                    "y": 1000.0 + (traj_id - 5) * 0.001,
-                    "z": float(i) * 0.5,
-                    "label": 1,
-                })
+                rows.append(
+                    {
+                        "traj_ind": traj_id,
+                        "time_stamp": f"2024-01-01 00:00:0{i}.{traj_id:06d}",
+                        "x": 1000.0 + float(i) + (traj_id - 5) * 0.001,
+                        "y": 1000.0 + (traj_id - 5) * 0.001,
+                        "z": float(i) * 0.5,
+                        "label": 1,
+                    }
+                )
         df = pd.DataFrame(rows)
         result = build_features(df)
         assert len(result) == 10

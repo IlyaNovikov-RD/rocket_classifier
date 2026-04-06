@@ -3,35 +3,55 @@
 # Prerequisites: uv must be installed.
 #   https://docs.astral.sh/uv/getting-started/installation/
 #
-# Usage:
-#   make install       Install all dependencies via uv
-#   make test          Run the full pytest suite
-#   make lint          Check code quality with ruff
-#   make format        Auto-format source files with ruff
-#   make demo          Launch the Streamlit interactive demo
-#   make lock          Regenerate uv.lock from pyproject.toml
-#   make download-models   Download model + medians + biases from GitHub Release
-#   make download-all      Download model artifacts + feature caches from GitHub Release
-#   make run               Run inference pipeline → submission.csv
-#   make train             Run full training pipeline (Optuna + consensus → artifacts/)
-#   make interpret         Regenerate SHAP plot + report after a new model is deployed
-#   make visualize         Regenerate demo.png (physics feature visualization)
-#   make pipeline          Full local pipeline: download-all → run → interpret
-#   make docker            Build + run Docker image → output/submission.csv
-#   make clean             Remove output/, cache/, artifacts/ for a fresh cold start
+# ── Setup ──
+#   make install            Install all dependencies via uv
+#   make lock               Regenerate uv.lock from pyproject.toml
+#   make clean              Remove output/, cache/, artifacts/ for a fresh cold start
 #
-# After training a new model (research/train.py):
-#   make export-model                         # build model.onnx + model_opt.onnx
-#   make release TAG=v1.x.0 NOTES="..."      # upload all artifacts + trigger CI
+# ── Quality ──
+#   make lint               Check code quality with ruff
+#   make format             Auto-format source files with ruff
+#   make test               Run the full pytest suite
+#
+# ── Data ──
+#   make download-models    Download model + medians + biases from GitHub Release
+#   make download-all       Download model artifacts + feature caches from GitHub Release
+#
+# ── Training ──
+#   make train              Run full training pipeline (Optuna + consensus → artifacts/)
+#   make export-model       Build model.onnx + model_opt.onnx from model.lgb
+#
+# ── Inference ──
+#   make run                Run inference pipeline → output/submission.csv
+#   make pipeline           Full local pipeline: download-all → run → interpret
+#
+# ── Analysis ──
+#   make interpret          Regenerate SHAP plot + report after a new model is deployed
+#   make visualize          Regenerate demo.png (physics feature visualization)
+#
+# ── Deploy ──
+#   make docker             Build + run Docker image → output/submission.csv
+#   make demo               Launch the Streamlit interactive demo (localhost:8501)
+#   make release TAG=v1.x.0 NOTES="..."   Upload all artifacts + trigger CI
+#
 #   ONNX files are included in the release from the start (no download gap).
 
-.PHONY: install test lint format demo lock download-models download-all run train interpret visualize pipeline export-model release docker clean
+.PHONY: install lock clean lint format test download-models download-all train export-model run pipeline interpret visualize docker demo release
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
 
 install:
 	uv sync --group dev
 
-test:
-	uv run pytest tests/ -v
+lock:
+	uv lock
+	uv export --no-dev --no-hashes -o requirements.txt
+
+clean:
+	rm -rf output/ cache/ artifacts/ __pycache__ rocket_classifier/__pycache__ tests/__pycache__
+	@echo "Cleaned output/, cache/, artifacts/, and __pycache__. Run make download-all to re-fetch artifacts."
+
+# ── Quality ───────────────────────────────────────────────────────────────────
 
 lint:
 	uv run ruff check .
@@ -39,11 +59,10 @@ lint:
 format:
 	uv run ruff format .
 
-demo:
-	uv run streamlit run rocket_classifier/app.py
+test:
+	uv run pytest tests/ -v
 
-lock:
-	uv lock
+# ── Data ──────────────────────────────────────────────────────────────────────
 
 download-models:
 	uv run python scripts/download_models.py
@@ -51,12 +70,24 @@ download-models:
 download-all:
 	uv run python scripts/download_models.py --with-caches
 
-run:
-	uv run python -m rocket_classifier.main
+# ── Training ──────────────────────────────────────────────────────────────────
 
 train:
 	uv sync --group research
 	uv run python research/train.py
+
+export-model:
+	uv run python scripts/export_fast_models.py
+
+# ── Inference ─────────────────────────────────────────────────────────────────
+
+run:
+	uv run python -m rocket_classifier.main
+
+pipeline: download-all run interpret
+	@echo "Pipeline complete. submission.csv and assets/ are up to date."
+
+# ── Analysis ──────────────────────────────────────────────────────────────────
 
 interpret:
 	uv sync --group research
@@ -66,19 +97,14 @@ visualize:
 	uv sync --group research
 	uv run python research/visualize.py
 
-export-model:
-	uv run python scripts/export_fast_models.py
-
-clean:
-	rm -rf output/ cache/ artifacts/ __pycache__ rocket_classifier/__pycache__ tests/__pycache__
-	@echo "Cleaned output/, cache/, artifacts/, and __pycache__. Run make download-all to re-fetch artifacts."
+# ── Deploy ────────────────────────────────────────────────────────────────────
 
 docker:
 	docker build -t rocket_classifier .
 	docker run --rm -v $$(pwd)/output:/app/output rocket_classifier
 
-pipeline: download-all run interpret
-	@echo "Pipeline complete. submission.csv and assets/ are up to date."
+demo:
+	uv run streamlit run rocket_classifier/app.py
 
 # Create a GitHub Release with all required artifacts.
 # Usage: make release TAG=v1.x.0 NOTES="What changed"
