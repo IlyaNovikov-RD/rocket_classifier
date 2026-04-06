@@ -36,7 +36,7 @@ This metric demands that every design decision — feature engineering, class we
 | 2 (minority — 7.1%) | 2,339 | 1.000000 | 0 |
 | **Global OOB (consensus)** | **32,741** | **1.000000** | **0** |
 
-Achieved via **proximity-based salvo consensus**: both OOB misses were class-0 rockets in tight salvos (dist ≈ 0 m, Δt < 12 s), each surrounded by same-class neighbours. Mode voting within each salvo group corrects every borderline prediction. Group purity = 100%, n_broken = 0.
+Achieved via **proximity-based salvo consensus**: the 2 OOB misses (1 class-0, 1 class-1) were rockets in tight salvos (dist ≈ 0 m, Δt < 12 s), each surrounded by same-class neighbours. Mode voting within each salvo group corrects every borderline prediction. Group purity = 100%, n_broken = 0.
 
 ---
 
@@ -221,7 +221,7 @@ An **oracle threshold test** tunes the per-class log-probability biases directly
 
 ### Step 2 — Miss diagnosis identified the fix
 
-All OOB misses were class-0 rockets mispredicted as class-1. Diagnostic analysis showed every miss had 2–4 same-class neighbours at **dist ≈ 0 m, dt < 12 s** — they were the last rocket in a tight salvo fired from the same launcher within seconds of correctly-classified class-0 siblings.
+The 2 OOB misses (1 class-0, 1 class-1) were rockets in tight salvos. Diagnostic analysis showed each miss had same-class neighbours at **dist ≈ 0 m, Δt < 12 s** — borderline predictions in salvos fired from the same launcher within seconds of correctly-classified siblings.
 
 ### Step 3 — Proximity consensus corrects the misses
 

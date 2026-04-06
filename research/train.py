@@ -23,14 +23,14 @@ log-probability threshold tuning and proximity-based salvo consensus.
 Research path to 1.0
 --------------------
 1. Kinematic features + 10-fold GroupKFold LightGBM → 0.999911 OOB.
-   The 2 misses are class-0 rockets mispredicted as class-1.
+   The 2 remaining misses are borderline predictions in tight salvos.
 
 2. Oracle analysis: per-fold threshold tuning achieves 1.0 on every fold.
    Conclusion: sufficient probability signal exists; the barrier is the
    global threshold constraint, not Bayes error.
 
-3. Miss diagnosis: all OOB misses are class-0 rockets in tight salvos
-   (dist ≈ 0 m, dt < 12 s), each with 2-4 same-class neighbours.
+3. Miss diagnosis: OOB misses (1 class-0, 1 class-1) are rockets in tight
+   salvos (dist ≈ 0 m, Δt < 12 s), each with same-class neighbours.
 
 4. Fix: proximity-based salvo consensus — group rockets fired from the
    same position within 60 s, apply mode voting.
