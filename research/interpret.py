@@ -149,7 +149,7 @@ def load_features() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def load_model(
     train_feats: pd.DataFrame,
-) -> tuple[object, list[str], pd.DataFrame]:
+) -> tuple[object, list[str], pd.DataFrame, np.ndarray]:
     """Load the production LightGBM model for SHAP analysis.
 
     The model expects 35-column input (32 SELECTED_FEATURES + 3 global class
