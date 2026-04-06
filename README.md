@@ -367,6 +367,10 @@ make demo            # streamlit demo (localhost:8501)
 ### Make Targets
 
 ```bash
+# Top-level
+make all              # full validation: setup → quality → train → test → run → analysis (~20 min)
+make all-full         # all + Docker build + Streamlit demo (~30 min)
+
 # Setup                                          ~1s
 make install          # uv sync --group dev
 make lock             # uv lock — regenerate uv.lock from pyproject.toml

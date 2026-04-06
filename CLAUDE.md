@@ -5,6 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run Commands
 
 ```bash
+# Top-level
+make all              # full validation: setup → quality → train → test → run → analysis
+make all-full         # all + Docker build + Streamlit demo
 # Setup
 make install          # uv sync --group dev — install all dependencies
 make lock             # uv lock — regenerate uv.lock from pyproject.toml
