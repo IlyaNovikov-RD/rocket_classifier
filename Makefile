@@ -13,17 +13,12 @@
 #   make format             Auto-format source files with ruff
 #   make test               Run the full pytest suite
 #
-# ── Data ──
-#   make download-models    Download model + medians + biases from GitHub Release
-#   make download-all       Download model artifacts + feature caches from GitHub Release
-#
 # ── Training ──
 #   make train              Run full training pipeline (Optuna + consensus → artifacts/)
 #   make export-model       Build model.onnx + model_opt.onnx from model.lgb
 #
 # ── Inference ──
 #   make run                Run inference pipeline → output/submission.csv
-#   make pipeline           Full local pipeline: download-all → run → interpret
 #
 # ── Analysis ──
 #   make interpret          Regenerate SHAP plot + report after a new model is deployed
@@ -32,11 +27,18 @@
 # ── Deploy ──
 #   make docker             Build + run Docker image → output/submission.csv
 #   make demo               Launch the Streamlit interactive demo (localhost:8501)
+#
+# ── Data (download pre-built artifacts instead of training) ──
+#   make download-models    Download model + medians + biases from GitHub Release
+#   make download-all       Download model artifacts + feature caches from GitHub Release
+#   make pipeline           Full local pipeline: download-all → run → interpret
+#
+# ── Release ──
 #   make release TAG=v1.x.0 NOTES="..."   Upload all artifacts + trigger CI
 #
 #   ONNX files are included in the release from the start (no download gap).
 
-.PHONY: install lock clean lint format test download-models download-all train export-model run pipeline interpret visualize docker demo release
+.PHONY: install lock clean lint format test train export-model run interpret visualize docker demo download-models download-all pipeline release
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -62,14 +64,6 @@ format:
 test:
 	uv run pytest tests/ -v
 
-# ── Data ──────────────────────────────────────────────────────────────────────
-
-download-models:
-	uv run python scripts/download_models.py
-
-download-all:
-	uv run python scripts/download_models.py --with-caches
-
 # ── Training ──────────────────────────────────────────────────────────────────
 
 train:
@@ -83,9 +77,6 @@ export-model:
 
 run:
 	uv run python -m rocket_classifier.main
-
-pipeline: download-all run interpret
-	@echo "Pipeline complete. submission.csv and assets/ are up to date."
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
@@ -106,6 +97,18 @@ docker:
 demo:
 	uv run streamlit run rocket_classifier/app.py
 
+# ── Data (download pre-built artifacts instead of training) ───────────────────
+
+download-models:
+	uv run python scripts/download_models.py
+
+download-all:
+	uv run python scripts/download_models.py --with-caches
+
+pipeline: download-all run interpret
+	@echo "Pipeline complete. submission.csv and assets/ are up to date."
+
+# ── Release ───────────────────────────────────────────────────────────────────
 # Create a GitHub Release with all required artifacts.
 # Usage: make release TAG=v1.x.0 NOTES="What changed"
 # Requires: artifacts/ and cache/ populated (run research/train.py first).

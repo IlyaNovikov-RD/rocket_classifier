@@ -377,17 +377,12 @@ make lint             # ruff check
 make format           # ruff format
 make test             # unit tests
 
-# Data
-make download-models  # fetch artifacts/ from GitHub Release
-make download-all     # + cache/ parquet caches + data/ (test.csv, sample_submission.csv)
-
 # Training
 make train            # full training pipeline (Optuna + consensus → artifacts/)
 make export-model     # convert model.lgb → model.onnx (run after model update)
 
 # Inference
 make run              # inference pipeline → output/submission.csv
-make pipeline         # download-all + run + interpret (full end-to-end)
 
 # Analysis
 make interpret        # regenerate SHAP assets after model update
@@ -396,6 +391,13 @@ make visualize        # regenerate assets/demo.png after feature changes
 # Deploy
 make docker           # build + run Docker image → output/submission.csv
 make demo             # streamlit demo (localhost:8501)
+
+# Data (download pre-built artifacts instead of training)
+make download-models  # fetch artifacts/ from GitHub Release
+make download-all     # + cache/ parquet caches + data/ (test.csv, sample_submission.csv)
+make pipeline         # download-all + run + interpret (full end-to-end)
+
+# Release
 make release TAG=v1.x.0 NOTES="..."  # create GitHub Release with all artifacts
 ```
 
