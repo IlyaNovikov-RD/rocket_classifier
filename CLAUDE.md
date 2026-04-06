@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Top-level
 make all              # full validation: setup → quality → train → test → run → analysis
-make all-full         # all + Docker build + Streamlit demo
+make all-full         # all + cold Docker rebuild + Streamlit demo
 # Setup
 make install          # uv sync --group dev — install all dependencies
 make lock             # uv lock — regenerate uv.lock from pyproject.toml
@@ -26,6 +26,7 @@ make interpret        # regenerate SHAP assets after model update
 make visualize        # regenerate assets/demo.png after feature changes
 # Deploy
 make docker           # build + run Docker image → output/submission.csv
+make docker-clean     # remove image and rebuild from scratch
 make demo             # launch Streamlit app (localhost:8501)
 # Data (download pre-built artifacts instead of training)
 make download-models  # fetch model artifacts from latest GitHub Release into artifacts/

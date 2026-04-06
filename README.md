@@ -369,7 +369,7 @@ make demo            # streamlit demo (localhost:8501)
 ```bash
 # Top-level
 make all              # full validation: setup → quality → train → test → run → analysis (~20 min)
-make all-full         # all + Docker build + Streamlit demo (~30 min)
+make all-full         # all + cold Docker rebuild + Streamlit demo (~20 min)
 
 # Setup                                          ~1s
 make install          # uv sync --group dev
@@ -392,8 +392,9 @@ make run              # inference pipeline → output/submission.csv
 make interpret        # regenerate SHAP assets after model update (~60s)
 make visualize        # regenerate assets/demo.png (~3s)
 
-# Deploy                                         ~9 min first build
+# Deploy                                         ~2 min cold build
 make docker           # build + run Docker image → output/submission.csv
+make docker-clean     # remove image and rebuild from scratch
 make demo             # streamlit demo (localhost:8501)
 
 # Data (download pre-built artifacts instead of training)  ~30s
