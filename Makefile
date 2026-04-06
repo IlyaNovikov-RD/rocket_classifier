@@ -133,11 +133,13 @@ pipeline: download-all run interpret
 release:
 	@test -n "$(TAG)"   || (echo "Usage: make release TAG=v1.x.0 NOTES='...'"; exit 1)
 	@test -n "$(NOTES)" || (echo "Usage: make release TAG=v1.x.0 NOTES='...'"; exit 1)
+	@git diff --quiet --exit-code && git diff --cached --quiet --exit-code || (echo "Error: working tree is dirty — commit or stash changes first"; exit 1)
 	@test -f artifacts/model.lgb           || (echo "artifacts/model.lgb not found — run research/train.py first"; exit 1)
 	@test -f artifacts/train_medians.npy   || (echo "artifacts/train_medians.npy not found"; exit 1)
 	@test -f artifacts/threshold_biases.npy || (echo "artifacts/threshold_biases.npy not found"; exit 1)
 	@test -f artifacts/model_opt.onnx      || (echo "artifacts/model_opt.onnx not found — run: make export-model"; exit 1)
 	@test -f artifacts/model.onnx          || (echo "artifacts/model.onnx not found — run: make export-model"; exit 1)
+	@test -f training_report.json          || (echo "training_report.json not found — run research/train.py first"; exit 1)
 	@test -f cache/cache_train_features.parquet || (echo "cache/cache_train_features.parquet not found"; exit 1)
 	@test -f cache/cache_test_features.parquet  || (echo "cache/cache_test_features.parquet not found"; exit 1)
 	@test -f data/test.csv              || (echo "data/test.csv not found"; exit 1)

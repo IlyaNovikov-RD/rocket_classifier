@@ -376,7 +376,7 @@ def main() -> None:
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown(f"## 🚀 Rocket Classifier")  # noqa: F541
+        st.markdown("## 🚀 Rocket Classifier")
         st.markdown(
             "Adjust the physical parameters below to update the synthetic "
             "trajectory and watch the model classify it in real time."

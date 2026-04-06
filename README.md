@@ -36,7 +36,7 @@ This metric demands that every design decision — feature engineering, class we
 | 2 (minority — 7.1%) | 2,339 | 1.000000 | 0 |
 | **Global OOB (consensus)** | **32,741** | **1.000000** | **0** |
 
-Achieved via **proximity-based salvo consensus**: all OOB misses were class-0 rockets in tight salvos (dist ≈ 0 m, dt < 12 s) with 2–4 same-class neighbours. Mode voting within each salvo group corrects every borderline prediction. Group purity = 100%, n_broken = 0.
+Achieved via **proximity-based salvo consensus**: both OOB misses were class-0 rockets in tight salvos (dist ≈ 0 m, Δt < 12 s), each surrounded by same-class neighbours. Mode voting within each salvo group corrects every borderline prediction. Group purity = 100%, n_broken = 0.
 
 ---
 
@@ -455,6 +455,7 @@ tests/
 └── test_consensus.py           # Proximity consensus unit tests
 
 artifacts/                        # Model artifacts — gitignored, from GitHub Release
+├── model_opt.onnx              # Pre-graph-optimized ONNX (~0.3s faster load)
 ├── model.onnx                  # ONNX format — fastest inference (run: make export-model)
 ├── model.lgb                   # Native LightGBM — present after training
 ├── train_medians.npy           # 32-feature NaN imputation medians
