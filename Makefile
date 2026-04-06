@@ -11,11 +11,11 @@
 # ── Quality ──
 #   make lint               Check code quality with ruff
 #   make format             Auto-format source files with ruff
-#   make test               Run the full pytest suite
 #
 # ── Training ──
 #   make train              Run full training pipeline (Optuna + consensus → artifacts/)
 #   make export-model       Build model.onnx + model_opt.onnx from model.lgb
+#   make test               Run the full pytest suite (after artifacts exist)
 #
 # ── Inference ──
 #   make run                Run inference pipeline → output/submission.csv
@@ -38,7 +38,7 @@
 #
 #   ONNX files are included in the release from the start (no download gap).
 
-.PHONY: install lock clean lint format test train export-model run interpret visualize docker demo download-models download-all pipeline release
+.PHONY: install lock clean lint format train export-model test run interpret visualize docker demo download-models download-all pipeline release
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -61,9 +61,6 @@ lint:
 format:
 	uv run ruff format .
 
-test:
-	uv run pytest tests/ -v
-
 # ── Training ──────────────────────────────────────────────────────────────────
 
 train:
@@ -72,6 +69,9 @@ train:
 
 export-model:
 	uv run python scripts/export_fast_models.py
+
+test:
+	uv run pytest tests/ -v
 
 # ── Inference ─────────────────────────────────────────────────────────────────
 

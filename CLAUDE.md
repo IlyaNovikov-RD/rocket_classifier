@@ -12,10 +12,10 @@ make clean            # remove output/, cache/, artifacts/ for a fresh cold star
 # Quality
 make lint             # uv run ruff check .
 make format           # uv run ruff format .
-make test             # uv run pytest tests/ -v
 # Training
 make train            # full training pipeline (Optuna + consensus → artifacts/)
 make export-model     # convert model.lgb → model.onnx + model_opt.onnx (requires onnxmltools)
+make test             # uv run pytest tests/ -v (runs after artifacts exist → 105/105)
 # Inference
 make run              # inference pipeline → output/submission.csv
 # Analysis
