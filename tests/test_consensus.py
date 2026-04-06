@@ -195,7 +195,7 @@ class TestApplySalvoConsensus:
         assert (result[3:] == 2).all()
 
     def test_real_scenario_four_misses_corrected(self) -> None:
-        """Mirrors the actual training result: 4 misses in salvos, all corrected."""
+        """Stress test: 4 injected misses in salvos, all corrected by consensus."""
         rng = np.random.default_rng(42)
         n = 100
         y_true = rng.choice([0, 1, 2], size=n, p=[0.686, 0.243, 0.071])
