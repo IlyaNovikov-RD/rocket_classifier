@@ -3,6 +3,10 @@
 # Prerequisites: uv must be installed.
 #   https://docs.astral.sh/uv/getting-started/installation/
 #
+# ── Top-level ──
+#   make all                Run full validation: setup → quality → train → test → run → analysis
+#   make all-full           all + Docker build + Streamlit demo
+#
 # ── Setup ──
 #   make install            Install all dependencies via uv
 #   make lock               Regenerate uv.lock from pyproject.toml
@@ -38,7 +42,15 @@
 #
 #   ONNX files are included in the release from the start (no download gap).
 
-.PHONY: install lock clean lint format train export-model test run interpret visualize docker demo download-models download-all pipeline release
+.PHONY: all all-full install lock clean lint format train export-model test run interpret visualize docker demo download-models download-all pipeline release
+
+# ── Top-level ─────────────────────────────────────────────────────────────────
+
+all: install lock clean lint format train export-model test run interpret visualize
+	@echo "All targets passed."
+
+all-full: all docker demo
+	@echo "All targets (including Docker and demo) passed."
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -92,7 +104,7 @@ visualize:
 
 docker:
 	docker build -t rocket_classifier .
-	docker run --rm -v $$(pwd)/output:/app/output rocket_classifier
+	docker run --rm --mount type=bind,source=$$(pwd)/output,target=/app/output rocket_classifier
 
 demo:
 	uv run streamlit run rocket_classifier/app.py --server.headless=true
