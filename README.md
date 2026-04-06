@@ -372,14 +372,14 @@ make install          # uv sync --group dev
 make lock             # uv lock — regenerate uv.lock from pyproject.toml
 make clean            # remove output/, cache/, artifacts/ for a fresh cold start
 
-# Quality                                        ~16s
+# Quality                                        ~1s
 make lint             # ruff check
 make format           # ruff format
-make test             # unit tests (104 tests)
 
 # Training                                       ~15 min
 make train            # full training pipeline (Optuna + consensus → artifacts/)
 make export-model     # convert model.lgb → model.onnx (~48s)
+make test             # full test suite — 105 tests (~15s)
 
 # Inference                                      ~2.5 min
 make run              # inference pipeline → output/submission.csv
