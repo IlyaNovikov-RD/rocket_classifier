@@ -30,6 +30,7 @@
 #
 # ── Deploy ──
 #   make docker             Build + run Docker image → output/submission.csv
+#   make docker-clean       Remove image and rebuild from scratch
 #   make demo               Launch the Streamlit interactive demo (localhost:8501)
 #
 # ── Data (download pre-built artifacts instead of training) ──
@@ -42,14 +43,14 @@
 #
 #   ONNX files are included in the release from the start (no download gap).
 
-.PHONY: all all-full install lock clean lint format train export-model test run interpret visualize docker demo download-models download-all pipeline release
+.PHONY: all all-full install lock clean lint format train export-model test run interpret visualize docker docker-clean demo download-models download-all pipeline release
 
 # ── Top-level ─────────────────────────────────────────────────────────────────
 
 all: install lock clean lint format train export-model test run interpret visualize
 	@echo "All targets passed."
 
-all-full: all docker demo
+all-full: all docker-clean demo
 	@echo "All targets (including Docker and demo) passed."
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
@@ -105,6 +106,10 @@ visualize:
 docker:
 	docker build -t rocket_classifier .
 	docker run --rm --mount type=bind,source=$$(pwd)/output,target=/app/output rocket_classifier
+
+docker-clean:
+	docker rmi rocket_classifier 2>/dev/null || true
+	$(MAKE) docker
 
 demo:
 	uv run streamlit run rocket_classifier/app.py --server.headless=true
