@@ -385,7 +385,7 @@ make train            # full training pipeline (Optuna + consensus → artifacts
 make export-model     # convert model.lgb → model.onnx (~48s)
 make test             # full test suite — 105 tests (~15s)
 
-# Inference                                      ~2.5 min
+# Inference                                      ~1s hot, ~4.5 min cold
 make run              # inference pipeline → output/submission.csv
 
 # Analysis                                       ~1 min
@@ -453,6 +453,11 @@ tests/
 ├── test_model.py               # RocketClassifier + min_class_recall unit tests
 ├── test_schema.py              # Schema validation unit tests
 └── test_consensus.py           # Proximity consensus unit tests
+
+assets/                           # Generated visualizations (git-tracked)
+├── demo.png                    # Trajectory physics plot (make visualize)
+├── shap_summary.png            # SHAP feature importance (make interpret)
+└── interpretation_report.txt   # Human-readable model interpretation (make interpret)
 
 artifacts/                        # Model artifacts — gitignored, from GitHub Release
 ├── model_opt.onnx              # Pre-graph-optimized ONNX (~0.3s faster load)

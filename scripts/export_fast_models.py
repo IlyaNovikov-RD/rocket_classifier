@@ -5,8 +5,9 @@ Run once after downloading new models (or use: make export-model):
     uv run python export_fast_models.py
 
 Exports to artifacts/:
-    model.lgb   — native LightGBM text format (direct Booster API)
-    model.onnx  — ONNX format (fastest inference, 2.6x over native LightGBM)
+    model.lgb       — native LightGBM text format (direct Booster API)
+    model.onnx      — ONNX format (fastest inference, 2.6x over native LightGBM)
+    model_opt.onnx  — pre-graph-optimized ONNX (~0.3s faster load)
 
 The model expects 35-column input: 32 SELECTED_FEATURES + 3 rebel-group
 class-prior columns (appended automatically at inference by RocketClassifier).
