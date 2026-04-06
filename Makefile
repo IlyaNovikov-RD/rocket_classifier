@@ -95,7 +95,7 @@ docker:
 	docker run --rm -v $$(pwd)/output:/app/output rocket_classifier
 
 demo:
-	uv run streamlit run rocket_classifier/app.py
+	uv run streamlit run rocket_classifier/app.py --server.headless=true
 
 # ── Data (download pre-built artifacts instead of training) ───────────────────
 
