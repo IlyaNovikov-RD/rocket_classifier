@@ -8,6 +8,7 @@ __pycache__
 .ruff_cache
 research/
 data/
+artifacts/
 cache/
 output/
 .venv
