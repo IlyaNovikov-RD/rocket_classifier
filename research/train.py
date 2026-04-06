@@ -177,8 +177,6 @@ ROOT = Path(".")
 TRAIN_CSV = ROOT / "data" / "train.csv"
 CACHE_DIR = ROOT / "cache"
 ARTIFACTS_DIR = ROOT / "artifacts"
-CACHE_DIR.mkdir(exist_ok=True)
-ARTIFACTS_DIR.mkdir(exist_ok=True)
 FEATURE_CACHE = CACHE_DIR / "cache_train_features.parquet"
 
 N_CLASSES = 3
@@ -478,6 +476,9 @@ def build_kinematic_features(df: pd.DataFrame) -> pd.DataFrame:
 # ── Stage 0: Feature Engineering ──────────────────────────────────────────────
 
 if __name__ == "__main__":
+    CACHE_DIR.mkdir(exist_ok=True)
+    ARTIFACTS_DIR.mkdir(exist_ok=True)
+
     log.info("=" * 70)
     log.info("STAGE 0: FEATURE ENGINEERING")
     log.info("=" * 70)
