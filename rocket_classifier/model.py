@@ -79,7 +79,7 @@ SELECTED_FEATURES: list[str] = [
     "salvo_duration_s",
     "salvo_spatial_spread_m",
     "salvo_time_rank",
-    # ── Rebel-group features (3) — domain assumptions 3a, 3b, 3c ─────────
+    # ── Rebel-group features (3) — domain assumptions 3a & 3c ──────────────
     "group_total_rockets",
     "group_n_salvos",
     "group_max_salvo_size",
@@ -109,10 +109,10 @@ PRODUCTION_BIASES: np.ndarray = np.array([0.0, -0.25316455696202533, 1.265822784
 class _ONNXBackend:
     """ONNX Runtime inference backend (fastest — ~2.6x over native LightGBM)."""
 
-    def __init__(self, session: object) -> None:
+    def __init__(self, session: _ort.InferenceSession) -> None:  # type: ignore[union-attr]
         self._session = session
-        self._input_name: str = session.get_inputs()[0].name  # type: ignore[union-attr]
-        n_feat: int = session.get_inputs()[0].shape[1]  # type: ignore[union-attr]
+        self._input_name: str = session.get_inputs()[0].name
+        n_feat: int = session.get_inputs()[0].shape[1]
         # Validate that the ONNX model matches the expected feature count
         # (32 base features + 3 rebel-group prior columns = 35).
         expected = len(SELECTED_FEATURES) + 3
@@ -124,13 +124,13 @@ class _ONNXBackend:
                 "``make export-model``."
             )
         # Force JIT compilation now so first real inference call is fast.
-        self._session.run(  # type: ignore[union-attr]
+        self._session.run(
             ["probabilities"],
             {self._input_name: np.zeros((1, n_feat), dtype=np.float32)},
         )
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        return self._session.run(  # type: ignore[union-attr]
+        return self._session.run(
             ["probabilities"], {self._input_name: X.astype(np.float32, copy=False)}
         )[0]
 
@@ -142,7 +142,7 @@ class _NativeLGBMBackend:
         self._booster = booster
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        return self._booster.predict(X)  # type: ignore[union-attr]
+        return self._booster.predict(X)
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ class RocketClassifier:
 
     def __init__(
         self,
-        model: object,
+        model: _ONNXBackend | _NativeLGBMBackend,
         medians: np.ndarray,
         biases: np.ndarray = PRODUCTION_BIASES,
     ) -> None:
@@ -211,7 +211,7 @@ class RocketClassifier:
         onnx_path = base.with_suffix(".onnx")
         lgb_path = base.with_suffix(".lgb")
 
-        model: object
+        model: _ONNXBackend | _NativeLGBMBackend | None
         backend_name: str
 
         _onnx_candidate = (
@@ -241,10 +241,10 @@ class RocketClassifier:
                 backend_name = f"ONNX ({_onnx_candidate.name})"
             except Exception as exc:
                 logger.warning("ONNX backend unavailable (%s), trying lgb", exc)
-                model = None  # type: ignore[assignment]
+                model = None
                 backend_name = ""
         else:
-            model = None  # type: ignore[assignment]
+            model = None
             backend_name = ""
 
         if model is None and lgb_path.exists():
@@ -324,7 +324,7 @@ class RocketClassifier:
         """
         X = self._select_and_impute(feature_df)
         X = self._append_priors(X)
-        return self.model.predict_proba(X)  # type: ignore[union-attr]
+        return self.model.predict_proba(X)
 
     def predict_with_proba(self, feature_df: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Return threshold-tuned class predictions and raw probabilities in one pass.

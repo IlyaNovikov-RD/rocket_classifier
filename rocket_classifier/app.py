@@ -34,6 +34,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
+from rocket_classifier import RELEASE_BASE_URL
 from rocket_classifier.features import _extract_trajectory_features
 from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
 
@@ -41,7 +42,7 @@ _ARTIFACTS = Path(__file__).parent.parent / "artifacts"
 MODEL_PATH = _ARTIFACTS / "model.lgb"  # base path — from_artifacts resolves .onnx/.lgb
 MEDIANS_PATH = _ARTIFACTS / "train_medians.npy"
 BIASES_PATH = _ARTIFACTS / "threshold_biases.npy"
-_RELEASE_BASE = "https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download"
+_RELEASE_BASE = RELEASE_BASE_URL
 # All backends in the order RocketClassifier.from_artifacts() tries them.
 _RELEASE_ARTIFACTS: dict[Path, str] = {
     _ARTIFACTS / "model_opt.onnx": f"{_RELEASE_BASE}/model_opt.onnx",

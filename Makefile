@@ -160,6 +160,8 @@ release:
 	@echo "Release $(TAG) created. Post-release pipeline will run automatically."
 	@echo "Creating PR to commit training_report.json provenance..."
 	git checkout -B chore/training-report-$(TAG)
+	git config user.name  "$$(git log -1 --format='%an')" 2>/dev/null || true
+	git config user.email "$$(git log -1 --format='%ae')" 2>/dev/null || true
 	git add training_report.json
 	git diff --cached --quiet && echo "training_report.json unchanged, skipping PR" || \
 	  (git commit -m "chore: update training_report.json for $(TAG)" && \
