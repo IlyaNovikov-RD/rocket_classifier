@@ -187,11 +187,7 @@ class RocketClassifier:
                 "The medians array does not match SELECTED_FEATURES."
             )
         if not np.isfinite(medians).all():
-            bad = [
-                SELECTED_FEATURES[i]
-                for i in range(len(medians))
-                if not np.isfinite(medians[i])
-            ]
+            bad = [SELECTED_FEATURES[i] for i in range(len(medians)) if not np.isfinite(medians[i])]
             raise ValueError(
                 f"medians contains non-finite values for features: {bad}. "
                 "NaN/inf medians would silently corrupt imputation."
