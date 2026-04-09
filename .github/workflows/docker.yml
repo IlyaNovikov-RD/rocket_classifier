@@ -16,11 +16,11 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Build image
-        run: docker build -t rocket-classifier .
+        run: docker build -t rocket_classifier .
 
       - name: Smoke test — container starts and validates artifacts
         run: |
-          docker run --rm rocket-classifier \
+          docker run --rm rocket_classifier \
             uv run python -c "
           import numpy as np
           from pathlib import Path

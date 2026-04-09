@@ -728,7 +728,7 @@ if __name__ == "__main__":
         _, gid_inverse, gid_counts = np.unique(
             prox_group_ids, return_inverse=True, return_counts=True
         )
-        n_classes = int(preds.max()) + 1
+        n_classes = N_CLASSES
         group_class_votes = np.zeros((len(gid_counts), n_classes), dtype=np.int32)
         np.add.at(group_class_votes, (gid_inverse, preds), 1)
         top_class = np.argmax(group_class_votes, axis=1).astype(np.int32)
