@@ -51,6 +51,10 @@ jobs:
           if [ -z "$TAG" ]; then
             TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
           fi
+          if [ -z "$TAG" ]; then
+            echo "::error::Could not resolve release tag — aborting."
+            exit 1
+          fi
           echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Download model artifacts + feature caches

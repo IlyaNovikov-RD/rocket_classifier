@@ -238,7 +238,7 @@ def _add_salvo_group_features(
     # ── Salvo clustering (spatiotemporal) ──────────────────────────────────
     cluster_input = result[["launch_x", "launch_y", "_lt_s"]].fillna(0.0)
     cluster_scaled = StandardScaler().fit_transform(cluster_input)
-    raw_salvo = DBSCAN(eps=_SALVO_EPS, min_samples=_SALVO_MIN_SAMPLES, n_jobs=-1).fit_predict(
+    raw_salvo = DBSCAN(eps=_SALVO_EPS, min_samples=_SALVO_MIN_SAMPLES, n_jobs=1).fit_predict(
         cluster_scaled
     )
 
@@ -291,7 +291,7 @@ def _add_salvo_group_features(
     # ── Rebel-group clustering (pure-spatial) ──────────────────────────────
     spatial_input = result[["launch_x", "launch_y"]].fillna(0.0)
     spatial_scaled = StandardScaler().fit_transform(spatial_input)
-    raw_group = DBSCAN(eps=_GROUP_EPS, min_samples=_GROUP_MIN_SAMPLES, n_jobs=-1).fit_predict(
+    raw_group = DBSCAN(eps=_GROUP_EPS, min_samples=_GROUP_MIN_SAMPLES, n_jobs=1).fit_predict(
         spatial_scaled
     )
 
@@ -299,7 +299,7 @@ def _add_salvo_group_features(
     n_groups = len(set(raw_group[raw_group >= 0]))
     if n_groups < 2:
         for eps_try in [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75]:
-            lbls = DBSCAN(eps=eps_try, min_samples=_GROUP_MIN_SAMPLES, n_jobs=-1).fit_predict(
+            lbls = DBSCAN(eps=eps_try, min_samples=_GROUP_MIN_SAMPLES, n_jobs=1).fit_predict(
                 spatial_scaled
             )
             ng = len(set(lbls[lbls >= 0]))
