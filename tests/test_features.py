@@ -10,6 +10,7 @@ Coverage targets:
 """
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -520,6 +521,37 @@ class TestBuildFeatures:
         assert not missing, (
             f"build_features() is missing features required by model.py: {missing}\n"
             "Update features.py or SELECTED_FEATURES in model.py to stay in sync."
+        )
+
+    def test_train_selected_features_match_production(self):
+        """research/train.py SELECTED_FEATURES must equal model.py SELECTED_FEATURES.
+
+        The training script maintains its own copy (research/ intentionally avoids
+        importing from production).  If they drift, the trained model and the
+        inference pipeline disagree on column order — this test catches that.
+        """
+        # Only parse the source text — don't execute the 960-line training script.
+        import ast
+
+        source = Path(__file__).parent.parent / "research" / "train.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        train_features: list[str] | None = None
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "SELECTED_FEATURES"
+                and node.value is not None
+            ):
+                train_features = ast.literal_eval(node.value)
+                break
+        assert train_features is not None, (
+            "Could not find SELECTED_FEATURES assignment in research/train.py"
+        )
+        assert train_features == list(SELECTED_FEATURES), (
+            "research/train.py SELECTED_FEATURES differs from model.py.\n"
+            f"  production: {list(SELECTED_FEATURES)}\n"
+            f"  training:   {train_features}"
         )
 
     def test_multi_trajectory_dbscan_group_features(self):

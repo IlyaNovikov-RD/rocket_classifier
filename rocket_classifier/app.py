@@ -35,7 +35,7 @@ import requests
 import streamlit as st
 
 from rocket_classifier import RELEASE_BASE_URL
-from rocket_classifier.features import _extract_trajectory_features
+from rocket_classifier.features import _compute_derivatives, _extract_trajectory_features
 from rocket_classifier.model import SELECTED_FEATURES, RocketClassifier
 
 _ARTIFACTS = Path(__file__).parent.parent / "artifacts"
@@ -439,13 +439,8 @@ def main() -> None:
     color = CLASS_COLORS[class_idx]
     apogee_z = float(np.max(pos[:, 2]))
 
-    # Peak jerk via finite differences (mirrors _compute_derivatives logic)
-    dt_arr = np.diff(t)
-    vel = np.diff(pos, axis=0) / dt_arr[:, np.newaxis]
-    dt_acc = (dt_arr[:-1] + dt_arr[1:]) / 2.0
-    acc = np.diff(vel, axis=0) / dt_acc[:, np.newaxis]
-    dt_jk = (dt_acc[:-1] + dt_acc[1:]) / 2.0
-    jerk = np.diff(acc, axis=0) / dt_jk[:, np.newaxis]
+    # Peak jerk via the shared finite-difference function in features.py
+    _, _, jerk = _compute_derivatives(pos, np.diff(t))
     peak_jerk = float(np.max(np.linalg.norm(jerk, axis=1)))
 
     # ── Page header ────────────────────────────────────────────────────────────
