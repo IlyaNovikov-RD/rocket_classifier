@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -70,7 +71,7 @@ def _download_with_retry(url: str, dest: Path, *, max_retries: int = _MAX_RETRIE
         try:
             urllib.request.urlretrieve(url, str(dest))
             return
-        except Exception:
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError):
             if attempt == max_retries:
                 raise
             wait = _RETRY_BACKOFF_S * (2 ** (attempt - 1))

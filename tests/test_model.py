@@ -437,3 +437,46 @@ class TestBackendAgreement:
             preds_onnx,
             err_msg="ONNX and LightGBM backends produce different predictions",
         )
+
+
+# ---------------------------------------------------------------------------
+# from_artifacts — backend fallback
+# ---------------------------------------------------------------------------
+
+
+class TestBackendFallback:
+    def test_no_backends_raises(self, tmp_path: Path) -> None:
+        """from_artifacts must raise FileNotFoundError when no model files exist."""
+        medians_path = tmp_path / "train_medians.npy"
+        np.save(str(medians_path), np.zeros(N_FEATURES))
+        biases_path = tmp_path / "threshold_biases.npy"
+        np.save(str(biases_path), np.zeros(3))
+        with pytest.raises(FileNotFoundError, match="No model backends available"):
+            RocketClassifier.from_artifacts(
+                tmp_path / "model.lgb",
+                medians_path,
+                biases_path,
+            )
+
+    def test_lgb_fallback_when_onnx_missing(self, tmp_path: Path) -> None:
+        """When ONNX files are absent but model.lgb exists, LightGBM loads successfully.
+
+        Skipped if artifacts are not present.
+        """
+        import shutil
+
+        artifacts_dir = Path(__file__).parent.parent / "artifacts"
+        lgb_path = artifacts_dir / "model.lgb"
+        medians_path = artifacts_dir / "train_medians.npy"
+        if not lgb_path.exists() or not medians_path.exists():
+            pytest.skip("artifacts not found")
+        # Copy only LGB + medians into temp dir (no ONNX files)
+        shutil.copy(lgb_path, tmp_path / "model.lgb")
+        shutil.copy(medians_path, tmp_path / "train_medians.npy")
+        clf = RocketClassifier.from_artifacts(
+            tmp_path / "model.lgb",
+            tmp_path / "train_medians.npy",
+        )
+        X = np.zeros((1, N_FEATURES))
+        preds = clf.predict(X)
+        assert preds.shape == (1,)
