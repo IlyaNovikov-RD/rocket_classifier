@@ -67,11 +67,11 @@ BLUE = "#58a6ff"
 
 
 _MIN_ARTIFACT_BYTES: dict[str, int] = {
-    "model_opt.onnx": 1_000,
-    "model.onnx": 1_000,
-    "model.lgb": 1_000,
-    "train_medians.npy": 100,
-    "threshold_biases.npy": 50,
+    "model_opt.onnx": 2_000_000,
+    "model.onnx": 2_000_000,
+    "model.lgb": 3_000_000,
+    "train_medians.npy": 150,
+    "threshold_biases.npy": 100,
 }
 
 
