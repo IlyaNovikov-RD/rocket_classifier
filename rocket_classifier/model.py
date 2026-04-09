@@ -180,6 +180,18 @@ class RocketClassifier:
         medians: np.ndarray,
         biases: np.ndarray = PRODUCTION_BIASES,
     ) -> None:
+        if medians.shape != (len(SELECTED_FEATURES),):
+            raise ValueError(
+                f"medians has shape {medians.shape}, "
+                f"expected ({len(SELECTED_FEATURES)},). "
+                "The medians array does not match SELECTED_FEATURES."
+            )
+        if not np.isfinite(medians).all():
+            bad = [SELECTED_FEATURES[i] for i in range(len(medians)) if not np.isfinite(medians[i])]
+            raise ValueError(
+                f"medians contains non-finite values for features: {bad}. "
+                "NaN/inf medians would silently corrupt imputation."
+            )
         self.model = model
         self.medians = medians
         self.biases = biases
@@ -262,13 +274,6 @@ class RocketClassifier:
             )
 
         medians = np.load(str(medians_path))
-        if medians.shape != (len(SELECTED_FEATURES),):
-            raise ValueError(
-                f"train_medians.npy has shape {medians.shape}, "
-                f"expected ({len(SELECTED_FEATURES)},). "
-                "The medians file does not match SELECTED_FEATURES — "
-                "regenerate it or download the correct version."
-            )
         biases = np.load(str(biases_path)) if biases_path else PRODUCTION_BIASES
         logger.info(
             "Loaded RocketClassifier [%s]: %d selected features "

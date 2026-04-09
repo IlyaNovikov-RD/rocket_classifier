@@ -251,13 +251,6 @@ def main() -> None:
     test_feats = get_features(test_raw, FEATURE_CACHE_TEST, "test")
 
     # --- Step 4: Load classifier ---
-    if not MODEL_PATH.exists():
-        logger.error(
-            "Model not found at %s. Run: make download-models",
-            MODEL_PATH,
-        )
-        return
-
     clf = RocketClassifier.from_artifacts(
         model_path=MODEL_PATH,
         medians_path=MEDIANS_PATH,

@@ -342,3 +342,98 @@ class TestRocketClassifierPredict:
         X = np.zeros((1, N_FEATURES))
         preds, _ = clf.predict_with_proba(X)
         assert preds[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# from_artifacts — medians validation
+# ---------------------------------------------------------------------------
+
+
+class TestMediansValidation:
+    def test_nan_medians_rejected(self) -> None:
+        """Medians containing NaN must be rejected at construction time.
+
+        NaN medians would silently produce NaN-imputed features, which
+        degrade predictions without any visible error.
+        """
+        medians = np.zeros(N_FEATURES)
+        medians[5] = np.nan
+        stub = _StubModel(np.ones((1, 3)) / 3)
+        with pytest.raises(ValueError, match="non-finite"):
+            RocketClassifier(model=stub, medians=medians)
+
+    def test_inf_medians_rejected(self) -> None:
+        """Medians containing inf must be rejected at construction time."""
+        medians = np.zeros(N_FEATURES)
+        medians[0] = np.inf
+        stub = _StubModel(np.ones((1, 3)) / 3)
+        with pytest.raises(ValueError, match="non-finite"):
+            RocketClassifier(model=stub, medians=medians)
+
+    def test_wrong_shape_medians_rejected(self) -> None:
+        """Medians with wrong shape must be rejected."""
+        medians = np.zeros(10)  # wrong size
+        stub = _StubModel(np.ones((1, 3)) / 3)
+        with pytest.raises(ValueError, match="shape"):
+            RocketClassifier(model=stub, medians=medians)
+
+
+# ---------------------------------------------------------------------------
+# ONNX vs LightGBM backend agreement
+# ---------------------------------------------------------------------------
+
+
+class TestBackendAgreement:
+    def test_onnx_and_lgb_predictions_agree(self) -> None:
+        """When both backends are available, they must produce identical predictions.
+
+        Skipped if artifacts are not present (CI without downloaded artifacts).
+        """
+        artifacts_dir = Path(__file__).parent.parent / "artifacts"
+        lgb_path = artifacts_dir / "model.lgb"
+        medians_path = artifacts_dir / "train_medians.npy"
+        onnx_path = artifacts_dir / "model.onnx"
+        onnx_opt_path = artifacts_dir / "model_opt.onnx"
+
+        if not lgb_path.exists() or not medians_path.exists():
+            pytest.skip("artifacts/model.lgb or train_medians.npy not found")
+        if not onnx_path.exists() and not onnx_opt_path.exists():
+            pytest.skip("No ONNX model found in artifacts/")
+
+        try:
+            import lightgbm as lgb
+            import onnxruntime as ort
+        except ImportError:
+            pytest.skip("Both lightgbm and onnxruntime required for this test")
+
+        from rocket_classifier.model import _NativeLGBMBackend, _ONNXBackend
+
+        # Load LightGBM backend
+        booster = lgb.Booster(model_file=str(lgb_path))
+        lgb_backend = _NativeLGBMBackend(booster)
+
+        # Load ONNX backend
+        onnx_file = onnx_opt_path if onnx_opt_path.exists() else onnx_path
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        if onnx_file == onnx_opt_path:
+            so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+        session = ort.InferenceSession(str(onnx_file), sess_options=so)
+        onnx_backend = _ONNXBackend(session)
+
+        medians = np.load(str(medians_path))
+        clf_lgb = RocketClassifier(model=lgb_backend, medians=medians)
+        clf_onnx = RocketClassifier(model=onnx_backend, medians=medians)
+
+        # Generate test data: random features with some NaN
+        rng = np.random.default_rng(seed=42)
+        X = rng.standard_normal((100, N_FEATURES)).astype(np.float32)
+        X[rng.random((100, N_FEATURES)) < 0.1] = np.nan  # 10% NaN
+
+        preds_lgb = clf_lgb.predict(X)
+        preds_onnx = clf_onnx.predict(X)
+        np.testing.assert_array_equal(
+            preds_lgb,
+            preds_onnx,
+            err_msg="ONNX and LightGBM backends produce different predictions",
+        )
