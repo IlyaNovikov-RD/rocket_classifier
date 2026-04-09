@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Top-level
 make all              # full validation: setup → quality → train → test → run → analysis
-make all-full         # all + cold Docker rebuild + Streamlit demo
+make all-full         # all + cold Docker rebuild + Streamlit smoke test
 # Setup
 make install          # uv sync --group dev — install all dependencies
 make lock             # uv lock — regenerate uv.lock from pyproject.toml
