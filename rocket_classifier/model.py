@@ -93,7 +93,7 @@ SELECTED_FEATURES: list[str] = [
 #   (b) the rebel-group prior features had near-zero importance in the model.
 # Values: class 0 = 22462/32741, class 1 = 7940/32741, class 2 = 2339/32741.
 _GLOBAL_CLASS_PRIOR: np.ndarray = np.array(
-    [22462 / 32741, 7940 / 32741, 2339 / 32741], dtype=np.float32
+    [22462 / 32741, 7940 / 32741, 2339 / 32741], dtype=np.float64
 )
 
 # Production threshold biases found via OOB optimisation on Colab.
