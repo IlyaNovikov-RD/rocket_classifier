@@ -75,41 +75,6 @@ def _compute_derivatives(
     return vel, acc, jerk
 
 
-def _safe_stats(arr: np.ndarray, prefix: str) -> dict[str, float]:
-    """Compute descriptive statistics for a 1-D array with NaN fallback.
-
-    Returns five statistics (mean, std, min, max, median) for the input
-    array. If the array is empty, all five values are returned as NaN so
-    that downstream feature matrices remain consistently shaped regardless
-    of trajectory length.
-
-    Args:
-        arr: 1-D numeric array to summarise. May be empty.
-        prefix: String prefix applied to every output key, e.g. ``"speed"``
-            produces keys ``speed_mean``, ``speed_std``, etc.
-
-    Returns:
-        A dictionary with five entries keyed as ``{prefix}_mean``,
-        ``{prefix}_std``, ``{prefix}_min``, ``{prefix}_max``, and
-        ``{prefix}_median``. All values are Python floats.
-    """
-    if arr.size == 0:
-        return {
-            f"{prefix}_mean": np.nan,
-            f"{prefix}_std": np.nan,
-            f"{prefix}_min": np.nan,
-            f"{prefix}_max": np.nan,
-            f"{prefix}_median": np.nan,
-        }
-    return {
-        f"{prefix}_mean": float(np.mean(arr)),
-        f"{prefix}_std": float(np.std(arr)),
-        f"{prefix}_min": float(np.min(arr)),
-        f"{prefix}_max": float(np.max(arr)),
-        f"{prefix}_median": float(np.median(arr)),
-    }
-
-
 def _extract_trajectory_features(group: pd.DataFrame) -> dict[str, float]:
     """Extract the 25 production kinematic features for one trajectory.
 

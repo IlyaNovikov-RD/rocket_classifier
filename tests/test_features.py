@@ -3,7 +3,6 @@ Comprehensive unit tests for rocket_classifier/features.py.
 
 Coverage targets:
 - _compute_derivatives: shapes, known physics values, boundary point counts, dt=0
-- _safe_stats: empty array, single value, normal array
 - _extract_trajectory_features: 1/2/3/4+ point trajectories, vertical launch,
   duplicate timestamps, key completeness, apogee correctness
 - build_features: with and without label, multi-trajectory aggregation
@@ -19,7 +18,6 @@ import pytest
 from rocket_classifier.features import (
     _compute_derivatives,
     _extract_trajectory_features,
-    _safe_stats,
     build_features,
 )
 from rocket_classifier.model import SELECTED_FEATURES
@@ -185,42 +183,6 @@ class TestComputeDerivatives:
         np.testing.assert_allclose(vel[:, 0], [1.0, 1.0])
         # Uniform velocity → zero acceleration
         np.testing.assert_allclose(acc[:, 0], 0.0, atol=1e-10)
-
-
-# ===========================================================================
-# _safe_stats
-# ===========================================================================
-
-
-class TestSafeStats:
-    def test_empty_array_all_nan(self):
-        result = _safe_stats(np.array([]), "x")
-        assert set(result.keys()) == {"x_mean", "x_std", "x_min", "x_max", "x_median"}
-        assert all(math.isnan(v) for v in result.values())
-
-    def test_single_value(self):
-        result = _safe_stats(np.array([7.0]), "v")
-        assert result["v_mean"] == pytest.approx(7.0)
-        assert result["v_std"] == pytest.approx(0.0)
-        assert result["v_min"] == pytest.approx(7.0)
-        assert result["v_max"] == pytest.approx(7.0)
-        assert result["v_median"] == pytest.approx(7.0)
-
-    def test_normal_array(self):
-        arr = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-        result = _safe_stats(arr, "s")
-        assert result["s_mean"] == pytest.approx(3.0)
-        assert result["s_min"] == pytest.approx(1.0)
-        assert result["s_max"] == pytest.approx(5.0)
-        assert result["s_median"] == pytest.approx(3.0)
-
-    def test_prefix_applied_to_all_keys(self):
-        result = _safe_stats(np.array([1.0]), "pfx")
-        assert all(k.startswith("pfx_") for k in result)
-
-    def test_returns_five_keys(self):
-        result = _safe_stats(np.array([1.0, 2.0]), "z")
-        assert len(result) == 5
 
 
 # ===========================================================================

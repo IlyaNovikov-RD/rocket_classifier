@@ -383,7 +383,7 @@ make format           # ruff format
 # Training                                       ~15 min
 make train            # full training pipeline (Optuna + consensus → artifacts/)
 make export-model     # convert model.lgb → model.onnx (~48s)
-make test             # full test suite — 111 tests (~15s)
+make test             # full test suite — 106 tests (~15s)
 
 # Inference                                      ~1s hot, ~4.5 min cold
 make run              # inference pipeline → output/submission.csv
@@ -452,7 +452,8 @@ tests/
 ├── test_features.py            # Feature engineering unit tests
 ├── test_model.py               # RocketClassifier + min_class_recall unit tests
 ├── test_schema.py              # Schema validation unit tests
-└── test_consensus.py           # Proximity consensus unit tests
+├── test_consensus.py           # Proximity consensus unit tests
+└── test_docs.py                # CI guard: documented test counts match actual
 
 assets/                           # Generated visualizations (git-tracked)
 ├── demo.png                    # Trajectory physics plot (make visualize)
@@ -467,7 +468,7 @@ artifacts/                        # Model artifacts — gitignored, from GitHub 
 └── threshold_biases.npy        # Per-class log-probability biases [0.000000, -0.253165, 1.265823]
 
 cache/                          # Feature caches — gitignored
-├── cache_train_features.parquet   # 32-feature matrix (25 kinematic + 7 salvo/group, with label)
+├── cache_train_features.parquet   # 25 kinematic features + label (salvo/group recomputed by DBSCAN at training time)
 ├── cache_train_features.feather   # Arrow IPC sidecar — fast reads
 ├── cache_test_features.parquet    # 32-feature matrix (25 kinematic + 7 salvo/group)
 └── cache_test_features.feather
@@ -481,7 +482,7 @@ The automation in this project is not boilerplate — each choice directly serve
 
 | Practice | What it does | Why it matters here |
 |---|---|---|
-| **111 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
+| **106 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
 | **CI on every PR** | Runs lint + tests + Docker build | Ensures the inference pipeline (`make run`) stays reproducible on any machine, not just the developer's laptop. |
 | **Docker** | Packages the full inference environment | Makes the submission pipeline portable — one `docker run` reproduces the exact result with no dependency drift. |
 | **`make run`** | Single command → `output/submission.csv` | The submission is the deliverable. One command replicates the full result from cached features, with no manual steps. |
