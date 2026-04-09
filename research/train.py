@@ -611,6 +611,13 @@ if __name__ == "__main__":
                 raw_group, n_groups = lbls, ng
                 log.info("Auto-selected GROUP_EPS=%.2f → %d groups", eps_try, ng)
                 break
+        else:
+            log.warning(
+                "Rebel-group auto-tuning failed: no eps in [0.05..0.75] produced 2-20 "
+                "groups (got %d). Proceeding with singleton groups — group features "
+                "will be uninformative.",
+                n_groups,
+            )
     next_gid = int(raw_group.max()) + 1
     group_ids_col = raw_group.copy()
     for i in range(len(group_ids_col)):
