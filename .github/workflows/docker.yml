@@ -22,6 +22,7 @@ jobs:
         run: |
           docker run --rm rocket-classifier \
             uv run python -c "
+          import numpy as np
           from pathlib import Path
           from rocket_classifier.model import RocketClassifier, SELECTED_FEATURES, PRODUCTION_BIASES
           assert len(SELECTED_FEATURES) == 32
@@ -30,8 +31,20 @@ jobs:
           models = Path('/app/artifacts')
           assert (models / 'model.lgb').exists(), 'model.lgb not found'
           assert (models / 'train_medians.npy').exists(), 'train_medians.npy not found'
+          assert (models / 'threshold_biases.npy').exists(), 'threshold_biases.npy not found'
+          # Dummy inference: verify model loads and produces correct output shape
+          clf = RocketClassifier.from_artifacts(
+              model_path=models / 'model.lgb',
+              medians_path=models / 'train_medians.npy',
+              biases_path=models / 'threshold_biases.npy',
+          )
+          dummy = np.zeros((2, 32), dtype=np.float32)
+          preds = clf.predict(dummy)
+          assert preds.shape == (2,), f'Expected shape (2,), got {preds.shape}'
+          assert set(preds).issubset({0, 1, 2}), f'Unexpected labels: {set(preds)}'
           print('Model package imports OK')
           print(f'  SELECTED_FEATURES: {len(SELECTED_FEATURES)} features')
           print(f'  PRODUCTION_BIASES: {PRODUCTION_BIASES.tolist()}')
           print(f'  model.lgb: {(models / \"model.lgb\").stat().st_size} bytes')
+          print(f'  Dummy inference: preds={preds.tolist()} — OK')
           "

@@ -109,6 +109,8 @@ def get_features(df: pd.DataFrame | None, cache_path: Path, name: str) -> pd.Dat
 # Proximity consensus helpers (pure functions — no I/O, testable)
 # ---------------------------------------------------------------------------
 
+# Proximity consensus parameters — must match research/train.py and
+# artifacts/training_report.json (enforced by test_model.py::test_consensus_params_match_report).
 _PROX_POS_PRECISION = 2  # decimal places for rounding launch_x / launch_y
 _PROX_TIME_WINDOW_S = 60  # max total span (s) of a salvo group
 
@@ -135,6 +137,9 @@ def build_proximity_groups(
     lx_r = launch_x.fillna(0.0).round(_PROX_POS_PRECISION).values
     ly_r = launch_y.fillna(0.0).round(_PROX_POS_PRECISION).values
     lt_s = launch_lt_s.values
+
+    if len(lx_r) == 0:
+        return np.array([], dtype=np.int32)
 
     # Sort by (lx_r, ly_r, lt_s) — one global sort instead of per-group sorts.
     order = np.lexsort((lt_s, ly_r, lx_r))

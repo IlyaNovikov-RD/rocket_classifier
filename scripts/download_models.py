@@ -14,10 +14,16 @@ Usage:
 from __future__ import annotations
 
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
-RELEASE_BASE = "https://github.com/IlyaNovikov-RD/rocket_classifier/releases/latest/download"
+# Import the canonical URL from the production package to avoid duplication.
+# This script lives outside the package, so we add the project root to sys.path.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from rocket_classifier import RELEASE_BASE_URL
+
+RELEASE_BASE = RELEASE_BASE_URL
 
 # Required artifacts — pipeline fails without these.
 ARTIFACTS = [
@@ -54,6 +60,23 @@ DATA_DIR = ROOT / "data"
 ARTIFACTS_DIR.mkdir(exist_ok=True)
 CACHE_DIR.mkdir(exist_ok=True)
 
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_S = 2  # seconds; doubles each retry
+
+
+def _download_with_retry(url: str, dest: Path, *, max_retries: int = _MAX_RETRIES) -> None:
+    """Download a file with exponential-backoff retry on transient failures."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            urllib.request.urlretrieve(url, str(dest))
+            return
+        except Exception:
+            if attempt == max_retries:
+                raise
+            wait = _RETRY_BACKOFF_S * (2 ** (attempt - 1))
+            print(f"retry {attempt}/{max_retries} in {wait}s ...", end=" ", flush=True)
+            time.sleep(wait)
+
 
 def main(include_caches: bool = False) -> None:
     """Download model artifacts from GitHub Release into artifacts/ and cache/.
@@ -78,7 +101,7 @@ def main(include_caches: bool = False) -> None:
         url = f"{RELEASE_BASE}/{name}"
         print(f"  Downloading {name} ...", end=" ", flush=True)
         try:
-            urllib.request.urlretrieve(url, str(dest))
+            _download_with_retry(url, dest)
             size_mb = dest.stat().st_size / 1_048_576
             print(f"OK ({size_mb:.1f} MB)")
         except Exception as exc:
@@ -93,7 +116,7 @@ def main(include_caches: bool = False) -> None:
         url = f"{RELEASE_BASE}/{name}"
         print(f"  Downloading {name} ...", end=" ", flush=True)
         try:
-            urllib.request.urlretrieve(url, str(dest))
+            _download_with_retry(url, dest)
             size_mb = dest.stat().st_size / 1_048_576
             print(f"OK ({size_mb:.1f} MB)")
         except Exception:

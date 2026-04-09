@@ -88,6 +88,10 @@ class TrajectoryPoint(BaseModel):
     def label_must_be_valid_class(cls, v: object) -> int | None:
         """Reject label values outside the known class set {0, 1, 2}.
 
+        Float values are truncated via ``int()`` before validation
+        (e.g. 0.7 → 0, 1.9 → 1).  This mirrors pandas' implicit
+        float-to-int casting when CSV labels are read as floats.
+
         Args:
             v: Raw value supplied for the ``label`` field before coercion.
 

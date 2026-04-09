@@ -302,9 +302,15 @@ def _add_salvo_group_features(
                 dy = ly[:, None] - ly[None, :]
                 spread = float(np.sqrt(dx**2 + dy**2).max())
             else:
-                # Bounding-box diagonal for large salvos — avoids O(n²) memory.
-                # For dense point clouds the BB diagonal ≈ max pairwise distance.
-                spread = float(np.sqrt((lx.max() - lx.min()) ** 2 + (ly.max() - ly.min()) ** 2))
+                # Stochastic estimate for large salvos — avoids O(n²) memory.
+                # Sample 10 000 random pairs and take the max distance observed.
+                rng = np.random.default_rng(seed=42)
+                n_pairs = min(10_000, n * (n - 1) // 2)
+                idx_a = rng.integers(0, n, size=n_pairs)
+                idx_b = rng.integers(0, n, size=n_pairs)
+                spread = float(
+                    np.sqrt((lx[idx_a] - lx[idx_b]) ** 2 + (ly[idx_a] - ly[idx_b]) ** 2).max()
+                )
         ranks = pd.Series(lt).rank(method="first").astype(int).values
         for i, tid in enumerate(grp.index):
             salvo_rows.append(
@@ -337,6 +343,12 @@ def _add_salvo_group_features(
                 raw_group = lbls
                 logger.info("Auto-selected GROUP_EPS=%.2f → %d rebel groups", eps_try, ng)
                 break
+        else:
+            logger.warning(
+                "Rebel-group auto-tuning failed: no eps in [0.05..0.75] produced 2-20 groups "
+                "(got %d). Proceeding with singleton groups — group features will be uninformative.",
+                n_groups,
+            )
 
     next_gid = int(raw_group.max()) + 1
     group_ids = raw_group.copy()
@@ -378,6 +390,13 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
         All values are float64; NaN indicates a feature that could not be
         computed for a given trajectory.
     """
+    required_cols = {"traj_ind", "time_stamp", "x", "y", "z"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"build_features(): input DataFrame is missing required columns: {sorted(missing)}"
+        )
+
     df = df.copy()
     df["time_stamp"] = pd.to_datetime(df["time_stamp"], format="mixed")
     df = df.sort_values(["traj_ind", "time_stamp"])
