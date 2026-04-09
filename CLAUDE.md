@@ -60,7 +60,7 @@ Run a single test: `uv run pytest tests/test_model.py::TestMinClassRecall::test_
 - **Metric**: `min_class_recall` — worst-class recall. Every design choice optimises for this, not accuracy.
 - **32 features**: 25 kinematic features that survived backward elimination, plus 7 salvo/group features from domain assumptions. Production code only computes these 32 — the 51 eliminated features are no longer extracted.
 - **Model input = 35**: The model was trained with 32 base features + 3 rebel-group class-prior columns appended per fold. At production inference `_GLOBAL_CLASS_PRIOR` (the training class distribution) substitutes for those 3 columns — they have near-zero feature importance.
-- **Threshold biases** `[0.000000, -0.253165, 1.265823]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `artifacts/threshold_biases.npy` and `training_report.json`.
+- **Threshold biases** `[0.0, -0.25316455696202533, 1.2658227848101262]`: Applied as `argmax(log(proba) + biases)` to shift decision boundaries toward minority classes (class distribution: 69%/24%/7%). Exact values saved in `artifacts/threshold_biases.npy` and `training_report.json`.
 - **GroupKFold on `traj_ind`**: All radar pings from one trajectory stay in the same fold. Prevents data leakage.
 - **No training in production**: Model was trained via `research/train.py`. `rocket_classifier/` only does inference.
 - **ONNX regeneration**: After any model update, run `make export-model` (requires `onnxmltools`) to rebuild `artifacts/model.onnx` and `artifacts/model_opt.onnx` (pre-graph-optimized, ~0.3s faster to load) and benchmark all backends.

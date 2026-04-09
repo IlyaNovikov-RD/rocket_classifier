@@ -116,9 +116,9 @@ _PROX_TIME_WINDOW_S = 60  # max total span (s) of a salvo group
 
 
 def build_proximity_groups(
-    launch_x: "pd.Series",
-    launch_y: "pd.Series",
-    launch_lt_s: "pd.Series",
+    launch_x: pd.Series,
+    launch_y: pd.Series,
+    launch_lt_s: pd.Series,
 ) -> np.ndarray:
     """Assign each trajectory to a proximity group.
 
