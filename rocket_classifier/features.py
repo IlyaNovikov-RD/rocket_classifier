@@ -245,7 +245,9 @@ def _add_salvo_group_features(
     # Noise points (label=-1) each become their own singleton salvo
     noise_mask = raw_salvo == -1
     salvo_ids = raw_salvo.copy()
-    salvo_ids[noise_mask] = np.arange(int(raw_salvo.max()) + 1, int(raw_salvo.max()) + 1 + noise_mask.sum())
+    salvo_ids[noise_mask] = np.arange(
+        int(raw_salvo.max()) + 1, int(raw_salvo.max()) + 1 + noise_mask.sum()
+    )
     result["_salvo_id"] = salvo_ids
 
     # Per-salvo statistics
@@ -315,7 +317,9 @@ def _add_salvo_group_features(
 
     noise_grp = raw_group == -1
     group_ids = raw_group.copy()
-    group_ids[noise_grp] = np.arange(int(raw_group.max()) + 1, int(raw_group.max()) + 1 + noise_grp.sum())
+    group_ids[noise_grp] = np.arange(
+        int(raw_group.max()) + 1, int(raw_group.max()) + 1 + noise_grp.sum()
+    )
     result["_rebel_group_id"] = group_ids
 
     group_stats = result.groupby("_rebel_group_id").agg(
