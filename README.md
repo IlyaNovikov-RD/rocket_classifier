@@ -383,7 +383,7 @@ make format           # ruff format
 # Training                                       ~17 min
 make train            # full training pipeline (Optuna + consensus → artifacts/)
 make export-model     # convert model.lgb → model.onnx (~48s)
-make test             # full test suite — 110 tests (~16s)
+make test             # full test suite — 114 tests (~16s)
 
 # Inference                                      ~1s hot, ~3 min cold
 make run              # inference pipeline → output/submission.csv
@@ -482,7 +482,7 @@ The automation in this project is not boilerplate — each choice directly serve
 
 | Practice | What it does | Why it matters here |
 |---|---|---|
-| **110 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
+| **114 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
 | **CI on every PR** | Runs lint + tests + Docker build | Ensures the inference pipeline (`make run`) stays reproducible on any machine, not just the developer's laptop. |
 | **Docker** | Packages the full inference environment | Makes the submission pipeline portable — one `docker run` reproduces the exact result with no dependency drift. |
 | **`make run`** | Single command → `output/submission.csv` | The submission is the deliverable. One command replicates the full result from cached features, with no manual steps. |

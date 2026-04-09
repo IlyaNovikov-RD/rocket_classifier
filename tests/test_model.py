@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from rocket_classifier.main import _PROX_POS_PRECISION, _PROX_TIME_WINDOW_S
@@ -376,6 +377,94 @@ class TestMediansValidation:
         stub = _StubModel(np.ones((1, 3)) / 3)
         with pytest.raises(ValueError, match="shape"):
             RocketClassifier(model=stub, medians=medians)
+
+
+# ---------------------------------------------------------------------------
+# from_artifacts — biases validation
+# ---------------------------------------------------------------------------
+
+
+class TestBiasesValidation:
+    def test_nan_biases_rejected(self) -> None:
+        """Biases containing NaN must be rejected at construction time."""
+        biases = np.array([0.0, np.nan, 1.0])
+        stub = _StubModel(np.ones((1, 3)) / 3)
+        with pytest.raises(ValueError, match="non-finite"):
+            RocketClassifier(model=stub, medians=np.zeros(N_FEATURES), biases=biases)
+
+    def test_inf_biases_rejected(self) -> None:
+        """Biases containing inf must be rejected at construction time."""
+        biases = np.array([0.0, np.inf, 1.0])
+        stub = _StubModel(np.ones((1, 3)) / 3)
+        with pytest.raises(ValueError, match="non-finite"):
+            RocketClassifier(model=stub, medians=np.zeros(N_FEATURES), biases=biases)
+
+    def test_wrong_shape_biases_rejected(self) -> None:
+        """Biases with wrong shape must be rejected."""
+        biases = np.array([0.0, 1.0])  # only 2 entries
+        stub = _StubModel(np.ones((1, 3)) / 3)
+        with pytest.raises(ValueError, match="shape"):
+            RocketClassifier(model=stub, medians=np.zeros(N_FEATURES), biases=biases)
+
+
+# ---------------------------------------------------------------------------
+# Integration: features → predict → consensus
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineIntegration:
+    def test_features_to_consensus_end_to_end(self) -> None:
+        """Full data flow: build_features → select → predict → consensus.
+
+        Verifies that module boundaries are compatible: build_features
+        produces all SELECTED_FEATURES columns, the model accepts them,
+        and consensus returns the correct shape with valid labels.
+        """
+        from rocket_classifier.features import build_features
+        from rocket_classifier.main import apply_salvo_consensus, build_proximity_groups
+
+        # Synthetic multi-trajectory data: 3 salvos of 5 rockets each
+        rows = []
+        for traj_id in range(15):
+            base_x = (traj_id // 5) * 1000.0  # 3 distinct launch positions
+            base_ts = pd.Timestamp("2024-01-01") + pd.Timedelta(seconds=traj_id % 5)
+            for i in range(10):
+                rows.append(
+                    {
+                        "traj_ind": traj_id,
+                        "time_stamp": base_ts + pd.Timedelta(seconds=i * 0.05),
+                        "x": base_x + i * 2.0,
+                        "y": i * 1.5,
+                        "z": max(0.0, i * 10.0 - 0.5 * 9.81 * (i * 0.05) ** 2),
+                        "label": traj_id % 3,
+                    }
+                )
+        df = pd.DataFrame(rows)
+
+        feats = build_features(df)
+        assert feats.shape[0] == 15
+
+        # All 32 selected features must be present
+        missing = set(SELECTED_FEATURES) - set(feats.columns)
+        assert not missing, f"build_features missing features: {missing}"
+
+        X = feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32)
+        assert X.shape == (15, N_FEATURES)
+
+        # Predict with stub model (deterministic)
+        proba = np.tile([0.6, 0.3, 0.1], (15, 1))
+        clf = _make_clf(proba)
+        y_pred = clf.predict(X)
+        assert y_pred.shape == (15,)
+        assert set(y_pred).issubset({0, 1, 2})
+
+        # Consensus
+        lt_s = feats["launch_time"].astype(np.int64) / 1e9
+        group_ids = build_proximity_groups(feats["launch_x"], feats["launch_y"], lt_s)
+        assert group_ids.shape == (15,)
+        y_final = apply_salvo_consensus(y_pred, group_ids)
+        assert y_final.shape == (15,)
+        assert set(y_final).issubset({0, 1, 2})
 
 
 # ---------------------------------------------------------------------------

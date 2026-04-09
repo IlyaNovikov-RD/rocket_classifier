@@ -194,6 +194,16 @@ class RocketClassifier:
                 f"medians contains non-finite values for features: {bad}. "
                 "NaN/inf medians would silently corrupt imputation."
             )
+        if biases.shape != (3,):
+            raise ValueError(
+                f"biases has shape {biases.shape}, expected (3,). "
+                "The biases array must have one entry per class."
+            )
+        if not np.isfinite(biases).all():
+            raise ValueError(
+                f"biases contains non-finite values: {biases}. "
+                "Non-finite biases would corrupt prediction adjustment."
+            )
         self.model = model
         self.medians = medians
         self.biases = biases
