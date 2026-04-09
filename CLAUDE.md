@@ -18,7 +18,7 @@ make format           # uv run ruff format .
 # Training
 make train            # full training pipeline (Optuna + consensus → artifacts/)
 make export-model     # convert model.lgb → model.onnx + model_opt.onnx (requires onnxmltools)
-make test             # uv run pytest tests/ -v (runs after artifacts exist → 109/109)
+make test             # uv run pytest tests/ -v (runs after artifacts exist → 110/110)
 # Inference
 make run              # inference pipeline → output/submission.csv
 # Analysis
