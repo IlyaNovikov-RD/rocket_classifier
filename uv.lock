@@ -873,13 +873,13 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "onnxmltools", specifier = ">=1.10" },
+    { name = "onnxmltools", specifier = ">=1.10,<2.0" },
     { name = "pytest", specifier = ">=9.0.2,<10.0.0" },
     { name = "ruff", specifier = ">=0.15.7,<0.16.0" },
 ]
 research = [
-    { name = "matplotlib", specifier = ">=3.7" },
-    { name = "optuna", specifier = ">=3.0" },
+    { name = "matplotlib", specifier = ">=3.7,<4.0" },
+    { name = "optuna", specifier = ">=3.0,<5.0" },
     { name = "shap", specifier = ">=0.44,<0.52" },
 ]
 

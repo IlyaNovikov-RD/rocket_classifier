@@ -260,6 +260,13 @@ def main() -> None:
     # Select the 32 production features from the feature matrix.
     # reindex fills any missing columns with NaN — they will be imputed
     # from train_medians.npy.  Delete cache/*.parquet and re-run to rebuild.
+    missing_feats = set(SELECTED_FEATURES) - set(test_feats.columns)
+    if missing_feats:
+        logger.warning(
+            "%d selected features missing from cache (will be NaN-imputed): %s",
+            len(missing_feats),
+            sorted(missing_feats),
+        )
     X_test = test_feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32)
 
     # Log label distribution only when train features were loaded (cache rebuild path)
