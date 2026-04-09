@@ -171,9 +171,9 @@ log = logging.getLogger("train")
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-# Project root — works identically locally and on Colab (clone the repo,
-# data/ has raw CSVs, cache/ has feature parquets, artifacts/ has model files).
-ROOT = Path(".")
+# Project root — resolved from this file's location so the script works
+# regardless of the working directory (locally, on Colab, or from make train).
+ROOT = Path(__file__).resolve().parent.parent
 TRAIN_CSV = ROOT / "data" / "train.csv"
 CACHE_DIR = ROOT / "cache"
 ARTIFACTS_DIR = ROOT / "artifacts"
