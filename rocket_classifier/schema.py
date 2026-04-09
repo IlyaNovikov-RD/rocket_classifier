@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Self
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ def validate_dataframe(
         try:
             point = TrajectoryPoint.model_validate(record)
             valid.append(point)
-        except Exception as exc:
+        except (ValidationError, ValueError, TypeError) as exc:
             errors.append((int(idx), exc))
 
     if errors:

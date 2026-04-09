@@ -212,7 +212,10 @@ def benchmark(booster: object, X: np.ndarray) -> None:
             pass
 
     print("-" * 60)
-    print("All outputs verified identical.")
+    if p_native is not None and onnx_path.exists():
+        print("All outputs verified identical.")
+    else:
+        print("Benchmark complete (single backend — no cross-check).")
 
 
 if __name__ == "__main__":

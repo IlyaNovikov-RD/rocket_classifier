@@ -251,7 +251,7 @@ class RocketClassifier:
                 )
                 model = _ONNXBackend(session)
                 backend_name = f"ONNX ({_onnx_candidate.name})"
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 logger.warning("ONNX backend unavailable (%s), trying lgb", exc)
                 model = None
                 backend_name = ""
@@ -343,7 +343,7 @@ class RocketClassifier:
                 - proba: Float array of shape (N, 3) with per-class probabilities.
         """
         proba = self.predict_proba(feature_df)
-        adjusted = np.log(proba + 1e-12) + self.biases
+        adjusted = np.log(np.clip(proba, 1e-12, 1.0)) + self.biases
         return np.argmax(adjusted, axis=1).astype(int), proba
 
     def predict(self, feature_df: np.ndarray) -> np.ndarray:
