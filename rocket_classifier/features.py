@@ -311,7 +311,8 @@ def _add_salvo_group_features(
         else:
             logger.warning(
                 "Rebel-group auto-tuning failed: no eps in [0.05..0.75] produced 2-20 groups "
-                "(got %d). Proceeding with singleton groups — group features will be uninformative.",
+                "(initial clustering found %d). "
+                "Proceeding with singleton groups — group features will be uninformative.",
                 n_groups,
             )
 

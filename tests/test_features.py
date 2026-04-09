@@ -552,9 +552,67 @@ class TestBuildFeatures:
         assert len(result) == 10
         # With two well-separated clusters, DBSCAN should find >= 2 groups
         # and assign trajectories to groups with total_rockets >= 3
-        assert (result["group_total_rockets"] >= 3).any(), (
-            "At least some trajectories should be in a real rebel group"
+        assert (result["group_total_rockets"] >= 5).all(), (
+            "Every trajectory in a 5-member cluster should see group_total_rockets >= 5"
         )
+        assert (result["group_n_salvos"] >= 1).all()
+        assert (result["group_max_salvo_size"] >= 1).all()
+
+    def test_large_salvo_stochastic_spread(self):
+        """Salvos with > 1000 trajectories use stochastic pair sampling for spread.
+
+        The stochastic estimate (10 000 random pairs) must be close to the true max
+        pairwise distance and must be deterministic (seeded RNG).
+        """
+        n_traj = 1100
+        rows = []
+        for traj_id in range(n_traj):
+            for i in range(3):
+                rows.append(
+                    {
+                        "traj_ind": traj_id,
+                        "time_stamp": f"2024-01-01 00:00:0{i}.{traj_id:06d}",
+                        "x": float(traj_id) * 0.01 + float(i),
+                        "y": float(traj_id) * 0.01,
+                        "z": float(i) * 0.5,
+                        "label": 0,
+                    }
+                )
+        df = pd.DataFrame(rows)
+        result = build_features(df)
+        assert len(result) == n_traj
+        spreads = result["salvo_spatial_spread_m"]
+        assert (spreads > 0).any(), "Stochastic spread should be positive for scattered points"
+        # Run again — deterministic seed must produce identical results
+        result2 = build_features(df)
+        np.testing.assert_array_equal(
+            result["salvo_spatial_spread_m"].values,
+            result2["salvo_spatial_spread_m"].values,
+            err_msg="Stochastic spread must be deterministic (seeded RNG)",
+        )
+
+    def test_dbscan_group_auto_tuning(self):
+        """When the default GROUP_EPS produces < 2 groups, auto-tuning tries
+        alternative eps values. Here all trajectories share one position so
+        initial DBSCAN finds at most 1 group; auto-tuning must still complete
+        without error and assign valid group features."""
+        rows = []
+        for traj_id in range(10):
+            for i in range(4):
+                rows.append(
+                    {
+                        "traj_ind": traj_id,
+                        "time_stamp": f"2024-01-01 00:00:0{i}.{traj_id:06d}",
+                        "x": float(i),
+                        "y": 0.0,
+                        "z": float(i) * 0.5,
+                        "label": 0,
+                    }
+                )
+        df = pd.DataFrame(rows)
+        result = build_features(df)
+        assert len(result) == 10
+        assert (result["group_total_rockets"] >= 1).all()
         assert (result["group_n_salvos"] >= 1).all()
         assert (result["group_max_salvo_size"] >= 1).all()
 
