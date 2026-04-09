@@ -319,11 +319,11 @@ For a long-running server that loads the model once and handles repeated request
 | Stage | Time |
 |---|---|
 | Load raw CSVs (1M+ rows) | ~3s |
-| Pydantic schema validation (train + test) | ~2m 50s |
-| Feature engineering — train (25 kinematic + 7 salvo/group × 32k trajectories) | ~76s |
-| Feature engineering — test (25 kinematic + 7 salvo/group × 8k trajectories) | ~19s |
+| Pydantic schema validation (train + test) | ~30s |
+| Feature engineering — train (25 kinematic + 7 salvo/group × 32k trajectories) | ~2 min |
+| Feature engineering — test (25 kinematic + 7 salvo/group × 8k trajectories) | ~22s |
 | Model inference + consensus | ~1.0s |
-| **Total cold start** | **~4.5 min** |
+| **Total cold start** | **~3 min** |
 
 ---
 
@@ -368,8 +368,8 @@ make demo            # streamlit demo (localhost:8501)
 
 ```bash
 # Top-level
-make all              # full validation: setup → quality → train → test → run → analysis (~16 min)
-make all-full         # all + cold Docker rebuild + Streamlit demo (~25 min)
+make all              # full validation: setup → quality → train → test → run → analysis (~20 min)
+make all-full         # all + cold Docker rebuild + Streamlit smoke test (~30 min)
 
 # Setup                                          ~1s
 make install          # uv sync --group dev
@@ -380,12 +380,12 @@ make clean            # remove output/, cache/, artifacts/ for a fresh cold star
 make lint             # ruff check
 make format           # ruff format
 
-# Training                                       ~15 min
+# Training                                       ~17 min
 make train            # full training pipeline (Optuna + consensus → artifacts/)
 make export-model     # convert model.lgb → model.onnx (~48s)
-make test             # full test suite — 106 tests (~15s)
+make test             # full test suite — 106 tests (~16s)
 
-# Inference                                      ~1s hot, ~4.5 min cold
+# Inference                                      ~1s hot, ~3 min cold
 make run              # inference pipeline → output/submission.csv
 
 # Analysis                                       ~1 min

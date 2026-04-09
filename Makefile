@@ -5,7 +5,8 @@
 #
 # ── Top-level ──
 #   make all                Run full validation: setup → quality → train → test → run → analysis
-#   make all-full           all + Docker build + Streamlit demo
+#   make all-full           all + Docker build + Streamlit smoke test
+#   make demo-check         Smoke-test: start Streamlit, verify HTTP 200, stop
 #
 # ── Setup ──
 #   make install            Install all dependencies via uv
@@ -43,14 +44,14 @@
 #
 #   ONNX files are included in the release from the start (no download gap).
 
-.PHONY: all all-full install lock clean lint format train export-model test run interpret visualize docker docker-clean demo download-models download-all pipeline release
+.PHONY: all all-full install lock clean lint format train export-model test run interpret visualize docker docker-clean demo demo-check download-models download-all pipeline release
 
 # ── Top-level ─────────────────────────────────────────────────────────────────
 
 all: install lock clean lint format train export-model test run interpret visualize
 	@echo "All targets passed."
 
-all-full: all docker-clean demo
+all-full: all docker-clean demo-check
 	@echo "All targets (including Docker and demo) passed."
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
@@ -113,6 +114,21 @@ docker-clean:
 
 demo:
 	uv run streamlit run rocket_classifier/app.py --server.headless=true
+
+demo-check:
+	@echo "Smoke-testing Streamlit demo (start → HTTP 200 → stop)..."
+	@uv run streamlit run rocket_classifier/app.py --server.headless=true &>/dev/null & \
+		PID=$$!; \
+		for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
+			sleep 1; \
+			if curl -s -o /dev/null -w '' http://localhost:8501/ 2>/dev/null; then \
+				kill $$PID 2>/dev/null; wait $$PID 2>/dev/null; \
+				echo "Streamlit demo: HTTP 200 OK"; \
+				exit 0; \
+			fi; \
+		done; \
+		kill $$PID 2>/dev/null; wait $$PID 2>/dev/null; \
+		echo "ERROR: Streamlit did not respond within 15 s"; exit 1
 
 # ── Data (download pre-built artifacts instead of training) ───────────────────
 
