@@ -98,7 +98,9 @@ _GLOBAL_CLASS_PRIOR: np.ndarray = np.array(
 
 # Production threshold biases found via OOB optimisation on Colab.
 # Applied as: preds = argmax(log(proba) + BIASES)
-PRODUCTION_BIASES: np.ndarray = np.array([0.0, -0.25316455696202533, 1.2658227848101262])
+PRODUCTION_BIASES: np.ndarray = np.array(
+    [0.0, -0.25316455696202533, 1.2658227848101262], dtype=np.float64
+)
 
 
 # ---------------------------------------------------------------------------

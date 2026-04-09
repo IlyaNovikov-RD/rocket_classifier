@@ -42,6 +42,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev --group research
 
+      - name: Resolve release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Download model artifacts + feature caches
         run: uv run python scripts/download_models.py --with-caches
 
@@ -52,14 +63,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          if [ -z "$TAG" ]; then
-            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-          fi
-          gh release delete-asset "$TAG" model.onnx --yes 2>/dev/null || true
-          gh release upload "$TAG" artifacts/model.onnx
-          gh release delete-asset "$TAG" model_opt.onnx --yes 2>/dev/null || true
-          gh release upload "$TAG" artifacts/model_opt.onnx
+          gh release delete-asset "${{ steps.tag.outputs.TAG }}" model.onnx --yes 2>/dev/null || true
+          gh release upload "${{ steps.tag.outputs.TAG }}" artifacts/model.onnx
+          gh release delete-asset "${{ steps.tag.outputs.TAG }}" model_opt.onnx --yes 2>/dev/null || true
+          gh release upload "${{ steps.tag.outputs.TAG }}" artifacts/model_opt.onnx
 
       - name: Run inference pipeline
         run: uv run python -m rocket_classifier.main
@@ -71,23 +78,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          # Fall back to the latest release tag when triggered via workflow_dispatch
-          if [ -z "$TAG" ]; then
-            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-          fi
-          # Remove old submission.csv from release if it exists, then re-upload
-          gh release delete-asset "$TAG" submission.csv --yes 2>/dev/null || true
-          gh release upload "$TAG" output/submission.csv
+          gh release delete-asset "${{ steps.tag.outputs.TAG }}" submission.csv --yes 2>/dev/null || true
+          gh release upload "${{ steps.tag.outputs.TAG }}" output/submission.csv
 
       - name: Upload SHAP assets to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          if [ -z "$TAG" ]; then
-            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-          fi
-          gh release delete-asset "$TAG" shap_summary.png --yes 2>/dev/null || true
-          gh release delete-asset "$TAG" interpretation_report.txt --yes 2>/dev/null || true
-          gh release upload "$TAG" assets/shap_summary.png assets/interpretation_report.txt
+          gh release delete-asset "${{ steps.tag.outputs.TAG }}" shap_summary.png --yes 2>/dev/null || true
+          gh release delete-asset "${{ steps.tag.outputs.TAG }}" interpretation_report.txt --yes 2>/dev/null || true
+          gh release upload "${{ steps.tag.outputs.TAG }}" assets/shap_summary.png assets/interpretation_report.txt

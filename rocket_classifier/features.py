@@ -385,8 +385,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Per-trajectory feature DataFrame with ``traj_ind`` as the index.
         Shape is (n_trajectories, 33) without label, (n_trajectories, 34)
-        with label — 25 kinematic features plus 7 salvo/group features
-        plus ``launch_time``.
+        with label — 25 kinematic + 7 salvo/group + 1 ``launch_time``.
         All values are float64; NaN indicates a feature that could not be
         computed for a given trajectory.
     """
