@@ -69,20 +69,26 @@ BLUE = "#58a6ff"
 def _ensure_artifact(path: Path, url: str) -> bool:
     """Download artifact from url to path if not already present.
 
+    Writes to a temporary file first and renames on success so that a
+    connection drop mid-download never leaves a corrupt partial file.
+
     Returns True if the file is available (existed or downloaded successfully),
     False if the download failed.
     """
     if path.exists():
         return True
+    tmp = path.with_suffix(path.suffix + ".tmp")
     try:
         response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()
-        with path.open("wb") as f:
+        with tmp.open("wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
+        tmp.replace(path)
         return True
     except requests.RequestException as exc:
+        tmp.unlink(missing_ok=True)
         st.warning(f"Could not download {path.name}: {exc}")
         return False
 
