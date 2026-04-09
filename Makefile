@@ -159,7 +159,9 @@ release:
 	  --notes "$(NOTES)"
 	@echo "Release $(TAG) created. Post-release pipeline will run automatically."
 	@echo "Creating PR to commit training_report.json provenance..."
-	git checkout -B chore/training-report-$(TAG)
+	git show-ref --verify --quiet refs/heads/chore/training-report-$(TAG) && \
+	  (echo "Error: branch chore/training-report-$(TAG) already exists — delete it first or use a new TAG"; exit 1) || true
+	git checkout -b chore/training-report-$(TAG)
 	git config user.name  "$$(git log -1 --format='%an')" 2>/dev/null || true
 	git config user.email "$$(git log -1 --format='%ae')" 2>/dev/null || true
 	git add training_report.json
