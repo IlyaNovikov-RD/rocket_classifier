@@ -359,9 +359,8 @@ class RocketClassifier:
         Returns:
             Integer array of shape (N,) with class labels in {0, 1, 2}.
         """
-        proba = self.predict_proba(feature_df)
-        adjusted = np.log(proba + 1e-12) + self.biases
-        return np.argmax(adjusted, axis=1).astype(int)
+        preds, _ = self.predict_with_proba(feature_df)
+        return preds
 
 
 def min_class_recall(y_true: np.ndarray, y_pred: np.ndarray) -> float:

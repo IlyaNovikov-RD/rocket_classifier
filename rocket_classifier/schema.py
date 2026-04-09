@@ -182,9 +182,10 @@ def validate_dataframe(
     valid: list[TrajectoryPoint] = []
     errors: list[tuple[int, Exception]] = []
 
-    for idx, row in df[payload_cols].iterrows():
+    records = df[payload_cols].to_dict(orient="records")
+    for idx, record in zip(df.index, records, strict=True):
         try:
-            point = TrajectoryPoint.model_validate(row.to_dict())
+            point = TrajectoryPoint.model_validate(record)
             valid.append(point)
         except Exception as exc:
             errors.append((int(idx), exc))
