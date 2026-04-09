@@ -76,7 +76,8 @@ class TestBuildProximityGroups:
         # Absolute-span: group restarts whenever t - group_start > window
         assert groups[0] == groups[1]  # span = gap <= window → same group
         assert groups[2] != groups[0]  # span = gap*2 > window → new group
-        assert groups[3] != groups[0]  # span = gap*3 > window → yet another group
+        assert groups[3] == groups[2]  # span from new start = gap ≤ window → same restarted group
+        assert groups[3] != groups[0]
 
     def test_different_positions_different_groups(self) -> None:
         """Rockets at different positions are never in the same group."""
