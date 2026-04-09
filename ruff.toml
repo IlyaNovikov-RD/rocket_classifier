@@ -1,7 +1,6 @@
 line-length = 100
 target-version = "py312"
 exclude = [
-    "research/colab_transformer_salvo.py",  # work in progress — not pushed
     ".venv/",
 ]
 
