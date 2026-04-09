@@ -340,6 +340,13 @@ def main() -> None:
     submission = (
         submission.set_index("trajectory_ind").reindex(sample_sub["trajectory_ind"]).reset_index()
     )
+    n_missing = submission["label"].isna().sum()
+    if n_missing:
+        raise ValueError(
+            f"Submission has {n_missing} NaN labels after reindex — "
+            "test_feats is missing trajectories present in sample_submission.csv"
+        )
+    submission["label"] = submission["label"].astype(int)
     submission = submission[["label", "trajectory_ind"]]
     submission.to_csv(OUTPUT_PATH, index=False)
 

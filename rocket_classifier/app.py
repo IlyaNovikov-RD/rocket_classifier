@@ -66,11 +66,22 @@ BLUE = "#58a6ff"
 # ── Model + feature loading ────────────────────────────────────────────────────
 
 
+_MIN_ARTIFACT_BYTES: dict[str, int] = {
+    "model_opt.onnx": 1_000,
+    "model.onnx": 1_000,
+    "model.lgb": 1_000,
+    "train_medians.npy": 100,
+    "threshold_biases.npy": 50,
+}
+
+
 def _ensure_artifact(path: Path, url: str) -> bool:
     """Download artifact from url to path if not already present.
 
     Writes to a temporary file first and renames on success so that a
     connection drop mid-download never leaves a corrupt partial file.
+    After download, verifies the file meets a minimum expected size to
+    guard against truncated or empty responses.
 
     Returns True if the file is available (existed or downloaded successfully),
     False if the download failed.
@@ -85,6 +96,15 @@ def _ensure_artifact(path: Path, url: str) -> bool:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
+        size = tmp.stat().st_size
+        min_size = _MIN_ARTIFACT_BYTES.get(path.name, 0)
+        if size < min_size:
+            tmp.unlink(missing_ok=True)
+            st.warning(
+                f"Downloaded {path.name} is too small ({size} bytes, "
+                f"expected >= {min_size}) — possible truncation."
+            )
+            return False
         tmp.replace(path)
         return True
     except requests.RequestException as exc:

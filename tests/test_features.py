@@ -641,3 +641,39 @@ class TestBuildFeatures:
         result = build_features(df)
         assert len(result) == 1
         assert not result["initial_speed"].isna().any()
+
+    def test_inconsistent_labels_uses_first(self):
+        """If a trajectory has conflicting labels across rows, build_features
+        uses the label from the first row (after time-sorting). This is not
+        expected in production data (schema enforces consistency), but the
+        behaviour should be deterministic rather than undefined."""
+        df = pd.DataFrame(
+            [
+                {
+                    "traj_ind": 1,
+                    "time_stamp": "2024-01-01 00:00:00",
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                    "label": 0,
+                },
+                {
+                    "traj_ind": 1,
+                    "time_stamp": "2024-01-01 00:00:00.05",
+                    "x": 1.0,
+                    "y": 0.0,
+                    "z": 0.5,
+                    "label": 2,
+                },
+                {
+                    "traj_ind": 1,
+                    "time_stamp": "2024-01-01 00:00:00.10",
+                    "x": 2.0,
+                    "y": 0.0,
+                    "z": 1.0,
+                    "label": 1,
+                },
+            ]
+        )
+        result = build_features(df)
+        assert result["label"].iloc[0] == 0, "Should use the label from the first row after sorting"

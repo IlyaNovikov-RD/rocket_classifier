@@ -466,6 +466,27 @@ class TestPipelineIntegration:
         assert y_final.shape == (15,)
         assert set(y_final).issubset({0, 1, 2})
 
+    def test_submission_reindex_no_nan_labels(self) -> None:
+        """Reindexing predictions against sample_submission must not introduce NaN.
+
+        Simulates the main.py submission export path: build a prediction
+        DataFrame, reindex it against a sample_submission order, and verify
+        that every trajectory has a valid integer label.
+        """
+        traj_ids = list(range(10))
+        y_pred = np.array([0, 1, 2, 0, 1, 2, 0, 1, 2, 0])
+        submission = pd.DataFrame({"trajectory_ind": traj_ids, "label": y_pred})
+        sample_order = list(reversed(traj_ids))  # different order, same IDs
+        sample_sub = pd.DataFrame({"trajectory_ind": sample_order})
+
+        submission = (
+            submission.set_index("trajectory_ind")
+            .reindex(sample_sub["trajectory_ind"])
+            .reset_index()
+        )
+        assert submission["label"].isna().sum() == 0, "Reindex introduced NaN labels"
+        assert list(submission["trajectory_ind"]) == sample_order
+
 
 # ---------------------------------------------------------------------------
 # ONNX vs LightGBM backend agreement
