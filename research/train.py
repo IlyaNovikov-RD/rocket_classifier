@@ -579,7 +579,15 @@ if __name__ == "__main__":
                 dy = ly[:, None] - ly[None, :]
                 spread = float(np.sqrt(dx**2 + dy**2).max())
             else:
-                spread = float(np.sqrt((lx.max() - lx.min()) ** 2 + (ly.max() - ly.min()) ** 2))
+                # Stochastic estimate for large salvos — avoids O(n²) memory.
+                # Must match rocket_classifier/features.py exactly.
+                rng = np.random.default_rng(seed=42)
+                n_pairs = min(10_000, n * (n - 1) // 2)
+                idx_a = rng.integers(0, n, size=n_pairs)
+                idx_b = rng.integers(0, n, size=n_pairs)
+                spread = float(
+                    np.sqrt((lx[idx_a] - lx[idx_b]) ** 2 + (ly[idx_a] - ly[idx_b]) ** 2).max()
+                )
         ranks = pd.Series(lt).rank(method="first").astype(int).values
         for i, tid in enumerate(grp.index):
             salvo_rows.append(
