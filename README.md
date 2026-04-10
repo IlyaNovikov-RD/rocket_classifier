@@ -449,11 +449,14 @@ research/                       # R&D scripts (GPU training)
 └── visualize.py                        # Feature visualization — run via `make visualize`
 
 tests/
-├── test_features.py            # Feature engineering unit tests
-├── test_model.py               # RocketClassifier + min_class_recall unit tests
-├── test_schema.py              # Schema validation unit tests
+├── conftest.py                 # Shared fixtures (StubModel, synthetic trajectory builder)
+├── test_app.py                 # Streamlit demo unit tests
 ├── test_consensus.py           # Proximity consensus unit tests
-└── test_docs.py                # CI guard: documented test counts match actual
+├── test_docs.py                # CI guard: documented test counts match actual
+├── test_features.py            # Feature engineering unit tests
+├── test_main.py                # Inference pipeline unit tests
+├── test_model.py               # RocketClassifier + min_class_recall unit tests
+└── test_schema.py              # Schema validation unit tests
 
 assets/                           # Generated visualizations (git-tracked)
 ├── demo.png                    # Trajectory physics plot (make visualize)
