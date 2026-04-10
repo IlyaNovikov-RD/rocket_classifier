@@ -38,3 +38,4 @@ packages = ["rocket_classifier"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
