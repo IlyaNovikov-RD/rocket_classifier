@@ -83,9 +83,9 @@ def main(include_caches: bool = False) -> None:
     """Download model artifacts from GitHub Release into artifacts/ and cache/.
 
     Args:
-        include_caches: If True, also downloads parquet feature caches (~15 MB)
-            and sample_submission.csv into data/. Required for ``make run``
-            when data/ is not available locally.
+        include_caches: If True, also downloads parquet feature caches (~5 MB)
+            plus test.csv and sample_submission.csv (~25 MB total extra).
+            Required for ``make run`` when data/ is not available locally.
     """
     required = ARTIFACTS + (CACHE_ARTIFACTS + DATA_ARTIFACTS if include_caches else [])
     for name in required:
