@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from conftest import N_FEATURES, StubModel, make_stub_clf
 
 from rocket_classifier.main import _PROX_POS_PRECISION, _PROX_TIME_WINDOW_S
 from rocket_classifier.model import (
@@ -27,34 +28,6 @@ from rocket_classifier.model import (
     RocketClassifier,
     min_class_recall,
 )
-
-N_FEATURES = 32
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-class _StubModel:
-    """Minimal stand-in for a LightGBM Booster.
-
-    Returns fixed probabilities supplied at construction time so tests are
-    fully deterministic without loading any model artifact from disk.
-    """
-
-    def __init__(self, proba: np.ndarray) -> None:
-        self._proba = proba
-
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        return self._proba.copy()
-
-
-def _make_clf(proba: np.ndarray) -> RocketClassifier:
-    """Build a RocketClassifier backed by a stub model."""
-    medians = np.zeros(N_FEATURES)
-    return RocketClassifier(model=_StubModel(proba), medians=medians)
-
 
 # ---------------------------------------------------------------------------
 # SELECTED_FEATURES contract
@@ -132,7 +105,7 @@ class TestMinClassRecall:
 class TestSelectAndImpute:
     def _make_clf_with_medians(self, medians: np.ndarray) -> RocketClassifier:
         proba = np.array([[1 / 3, 1 / 3, 1 / 3]])
-        return RocketClassifier(model=_StubModel(proba), medians=medians)
+        return RocketClassifier(model=StubModel(proba), medians=medians)
 
     def test_no_nan_unchanged(self) -> None:
         medians = np.ones(N_FEATURES) * 99.0
@@ -179,14 +152,14 @@ class TestAppendPriors:
         If _GLOBAL_CLASS_PRIOR shape is wrong or concatenation fails,
         the model receives wrong-shaped input and predicts silently incorrect classes.
         """
-        clf = _make_clf(np.ones((1, 3)) / 3)
+        clf = make_stub_clf(np.ones((1, 3)) / 3)
         X = np.zeros((5, N_FEATURES))
         out = clf._append_priors(X)
         assert out.shape == (5, N_FEATURES + 3)
 
     def test_appended_values_match_global_prior(self) -> None:
         """Every row of the appended prior columns must equal _GLOBAL_CLASS_PRIOR."""
-        clf = _make_clf(np.ones((1, 3)) / 3)
+        clf = make_stub_clf(np.ones((1, 3)) / 3)
         X = np.zeros((4, N_FEATURES))
         out = clf._append_priors(X)
         prior_cols = out[:, N_FEATURES:]  # last 3 columns
@@ -195,7 +168,7 @@ class TestAppendPriors:
 
     def test_original_columns_unchanged(self) -> None:
         """First 32 columns must be unchanged after appending priors."""
-        clf = _make_clf(np.ones((1, 3)) / 3)
+        clf = make_stub_clf(np.ones((1, 3)) / 3)
         X = np.arange(N_FEATURES * 3, dtype=float).reshape(3, N_FEATURES)
         out = clf._append_priors(X)
         np.testing.assert_array_equal(out[:, :N_FEATURES], X)
@@ -209,14 +182,14 @@ class TestAppendPriors:
 class TestRocketClassifierPredict:
     def test_predict_proba_shape(self) -> None:
         proba = np.array([[0.7, 0.2, 0.1], [0.1, 0.8, 0.1]])
-        clf = _make_clf(proba)
+        clf = make_stub_clf(proba)
         X = np.zeros((2, N_FEATURES))
         out = clf.predict_proba(X)
         assert out.shape == (2, 3)
 
     def test_predict_returns_int_labels(self) -> None:
         proba = np.array([[0.9, 0.05, 0.05]])
-        clf = _make_clf(proba)
+        clf = make_stub_clf(proba)
         X = np.zeros((1, N_FEATURES))
         preds = clf.predict(X)
         assert np.issubdtype(preds.dtype, np.integer)
@@ -226,7 +199,7 @@ class TestRocketClassifierPredict:
         # With zero biases the argmax of proba == argmax of log(proba)
         proba = np.array([[0.1, 0.8, 0.1], [0.6, 0.3, 0.1]])
         clf = RocketClassifier(
-            model=_StubModel(proba),
+            model=StubModel(proba),
             medians=np.zeros(N_FEATURES),
             biases=np.zeros(3),
         )
@@ -240,7 +213,7 @@ class TestRocketClassifierPredict:
         proba = np.array([[0.6, 0.3, 0.1]])
         biases = np.array([0.0, 0.0, 10.0])  # massive boost to class 2
         clf = RocketClassifier(
-            model=_StubModel(proba),
+            model=StubModel(proba),
             medians=np.zeros(N_FEATURES),
             biases=biases,
         )
@@ -319,7 +292,7 @@ class TestRocketClassifierPredict:
         """predict_with_proba must return the same results as calling predict and
         predict_proba separately — one pass, same outputs."""
         proba_fixed = np.array([[0.1, 0.7, 0.2], [0.6, 0.3, 0.1], [0.2, 0.2, 0.6]])
-        clf = _make_clf(proba_fixed)
+        clf = make_stub_clf(proba_fixed)
         X = np.zeros((3, N_FEATURES))
         preds, proba = clf.predict_with_proba(X)
         np.testing.assert_array_equal(preds, clf.predict(X))
@@ -327,7 +300,7 @@ class TestRocketClassifierPredict:
 
     def test_predict_with_proba_shapes(self) -> None:
         proba_fixed = np.array([[0.5, 0.3, 0.2]])
-        clf = _make_clf(proba_fixed)
+        clf = make_stub_clf(proba_fixed)
         X = np.zeros((1, N_FEATURES))
         preds, proba = clf.predict_with_proba(X)
         assert preds.shape == (1,)
@@ -338,7 +311,7 @@ class TestRocketClassifierPredict:
         proba_fixed = np.array([[0.6, 0.3, 0.1]])
         biases = np.array([0.0, 0.0, 10.0])
         clf = RocketClassifier(
-            model=_StubModel(proba_fixed), medians=np.zeros(N_FEATURES), biases=biases
+            model=StubModel(proba_fixed), medians=np.zeros(N_FEATURES), biases=biases
         )
         X = np.zeros((1, N_FEATURES))
         preds, _ = clf.predict_with_proba(X)
@@ -359,7 +332,7 @@ class TestMediansValidation:
         """
         medians = np.zeros(N_FEATURES)
         medians[5] = np.nan
-        stub = _StubModel(np.ones((1, 3)) / 3)
+        stub = StubModel(np.ones((1, 3)) / 3)
         with pytest.raises(ValueError, match="non-finite"):
             RocketClassifier(model=stub, medians=medians)
 
@@ -367,14 +340,14 @@ class TestMediansValidation:
         """Medians containing inf must be rejected at construction time."""
         medians = np.zeros(N_FEATURES)
         medians[0] = np.inf
-        stub = _StubModel(np.ones((1, 3)) / 3)
+        stub = StubModel(np.ones((1, 3)) / 3)
         with pytest.raises(ValueError, match="non-finite"):
             RocketClassifier(model=stub, medians=medians)
 
     def test_wrong_shape_medians_rejected(self) -> None:
         """Medians with wrong shape must be rejected."""
         medians = np.zeros(10)  # wrong size
-        stub = _StubModel(np.ones((1, 3)) / 3)
+        stub = StubModel(np.ones((1, 3)) / 3)
         with pytest.raises(ValueError, match="shape"):
             RocketClassifier(model=stub, medians=medians)
 
@@ -388,21 +361,21 @@ class TestBiasesValidation:
     def test_nan_biases_rejected(self) -> None:
         """Biases containing NaN must be rejected at construction time."""
         biases = np.array([0.0, np.nan, 1.0])
-        stub = _StubModel(np.ones((1, 3)) / 3)
+        stub = StubModel(np.ones((1, 3)) / 3)
         with pytest.raises(ValueError, match="non-finite"):
             RocketClassifier(model=stub, medians=np.zeros(N_FEATURES), biases=biases)
 
     def test_inf_biases_rejected(self) -> None:
         """Biases containing inf must be rejected at construction time."""
         biases = np.array([0.0, np.inf, 1.0])
-        stub = _StubModel(np.ones((1, 3)) / 3)
+        stub = StubModel(np.ones((1, 3)) / 3)
         with pytest.raises(ValueError, match="non-finite"):
             RocketClassifier(model=stub, medians=np.zeros(N_FEATURES), biases=biases)
 
     def test_wrong_shape_biases_rejected(self) -> None:
         """Biases with wrong shape must be rejected."""
         biases = np.array([0.0, 1.0])  # only 2 entries
-        stub = _StubModel(np.ones((1, 3)) / 3)
+        stub = StubModel(np.ones((1, 3)) / 3)
         with pytest.raises(ValueError, match="shape"):
             RocketClassifier(model=stub, medians=np.zeros(N_FEATURES), biases=biases)
 
@@ -453,7 +426,7 @@ class TestPipelineIntegration:
 
         # Predict with stub model (deterministic)
         proba = np.tile([0.6, 0.3, 0.1], (15, 1))
-        clf = _make_clf(proba)
+        clf = make_stub_clf(proba)
         y_pred = clf.predict(X)
         assert y_pred.shape == (15,)
         assert set(y_pred).issubset({0, 1, 2})

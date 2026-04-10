@@ -246,6 +246,7 @@ def main() -> None:
     # train_feats is only needed when rebuilding caches (label distribution
     # logging). Skip loading it entirely in the fast path — inference only
     # touches test_feats. train_medians.npy handles NaN imputation.
+    train_feats = None
     if not both_caches_exist:
         train_feats = get_features(train_raw, FEATURE_CACHE_TRAIN, "train")
     test_feats = get_features(test_raw, FEATURE_CACHE_TEST, "test")
@@ -270,7 +271,7 @@ def main() -> None:
     X_test = test_feats.reindex(columns=SELECTED_FEATURES).to_numpy(dtype=np.float32)
 
     # Log label distribution only when train features were loaded (cache rebuild path)
-    if not both_caches_exist and "label" in train_feats.columns:
+    if train_feats is not None and "label" in train_feats.columns:
         y_train = train_feats["label"].to_numpy(dtype=int)
         logger.info(
             "Label distribution — 0: %d, 1: %d, 2: %d",

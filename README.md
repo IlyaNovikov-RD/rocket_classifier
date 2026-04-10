@@ -110,8 +110,8 @@ The production model is LightGBM, trained via GPU-accelerated Optuna search (sto
 | `max_depth` | 9 | Leaf-wise growth on 32 features |
 | `num_leaves` | 249 | Optuna-determined |
 | `learning_rate` | 0.02085 | Optuna-determined |
-| `subsample` | 0.673 | Row sampling found by Optuna |
-| `colsample_bytree` | 0.673 | Feature sampling found by Optuna |
+| `subsample` | 0.6727 | Row sampling found by Optuna |
+| `colsample_bytree` | 0.6734 | Feature sampling found by Optuna |
 | `min_child_samples` | 37 | Optuna-determined |
 | `reg_alpha` | 0.00332 | L1 regularisation found by Optuna |
 | `reg_lambda` | 0.04205 | L2 regularisation found by Optuna |
@@ -383,7 +383,7 @@ make format           # ruff format
 # Training                                       ~17 min
 make train            # full training pipeline (Optuna + consensus → artifacts/)
 make export-model     # convert model.lgb → model.onnx (~48s)
-make test             # full test suite — 116 tests (~16s)
+make test             # full test suite — 130 tests (~16s)
 
 # Inference                                      ~1s hot, ~3 min cold
 make run              # inference pipeline → output/submission.csv
@@ -482,7 +482,7 @@ The automation in this project is not boilerplate — each choice directly serve
 
 | Practice | What it does | Why it matters here |
 |---|---|---|
-| **116 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
+| **130 unit + contract tests** | Validates every interface between modules | The metric (`min_class_recall`) penalises silent failures hard. A wrong feature shape or stale bias silently degrades the score — tests catch that before it reaches the submission. |
 | **CI on every PR** | Runs lint + tests + Docker build | Ensures the inference pipeline (`make run`) stays reproducible on any machine, not just the developer's laptop. |
 | **Docker** | Packages the full inference environment | Makes the submission pipeline portable — one `docker run` reproduces the exact result with no dependency drift. |
 | **`make run`** | Single command → `output/submission.csv` | The submission is the deliverable. One command replicates the full result from cached features, with no manual steps. |
