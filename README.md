@@ -348,7 +348,7 @@ git clone https://github.com/IlyaNovikov-RD/rocket_classifier.git
 cd rocket_classifier
 uv sync
 
-# Full pipeline — downloads ~20 MB from GitHub Release, runs in ~1.0s
+# Full pipeline — downloads ~107 MB from GitHub Release, runs in ~1.0s
 make pipeline
 # Output: output/submission.csv  +  updated assets/
 

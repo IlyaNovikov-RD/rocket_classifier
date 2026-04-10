@@ -41,7 +41,7 @@ OPTIONAL_ARTIFACTS = [
     "model.onnx",
 ]
 
-# Feature caches — large parquet files (~15 MB total).
+# Feature caches — parquet files (~5 MB total).
 # Optional: skip if you have data/ and want to recompute from scratch.
 CACHE_ARTIFACTS = [
     "cache_train_features.parquet",
