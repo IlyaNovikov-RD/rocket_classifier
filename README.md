@@ -46,7 +46,7 @@ Achieved via **proximity-based salvo consensus**: the 2 OOB misses (1 class-0, 1
 No mountains or valleys — `z` is absolute altitude with no terrain correction required. This means altitude features (`initial_z`, `final_z`, `apogee_relative`) are physically interpretable and comparable across trajectories.
 
 ### 2 — Frictionless ballistic physics
-Rockets follow standard ballistic flight after motor burnout. Under this assumption, vertical acceleration is constant at −g, and deviations from that encode thrust and drag. Kinematic features (velocity, acceleration, jerk) faithfully reflect the rocket's propulsion signature.
+Rockets follow standard ballistic flight modelled as a frictionless point mass. Under this assumption, vertical acceleration is constant at −g; any deviation from that baseline is attributable solely to motor burn. Kinematic features (velocity, acceleration, jerk) therefore capture the thrust profile directly, with no confounding aerodynamic terms.
 
 Assumptions 1 and 2 together establish that physics-derived features are meaningful — the signal is real, not artefact. Assumption 3 provides three business sub-assumptions from a domain expert, each directly driving a feature engineering decision.
 
@@ -89,7 +89,7 @@ Raw radar pings are aggregated into **32 scalar features** per trajectory — 25
 | Feature group | Selected | Why it works |
 |---|---|---|
 | **Velocity** — `vy_mean`, `vy_max`, `v_horiz_median`, `v_horiz_std`, `initial_speed` | 5 | Muzzle velocity is set by the propellant charge — a fixed physical constant per rocket type. `initial_speed` measures it directly. Horizontal speed encodes range capability. |
-| **Acceleration** — `acc_mag_mean`, `acc_mag_min`, `acc_mag_max`, `acc_horiz_std`, `acc_horiz_min`, `acc_horiz_max`, `az_std`, `mean_az` | 8 | Under frictionless ballistic physics (assumption 2), vertical acceleration is constant at −g. Deviations encode thrust and drag. `acc_mag_max` captures peak motor thrust (varies by motor type). `acc_horiz_min` captures peak lateral deceleration — the airframe's drag signature. |
+| **Acceleration** — `acc_mag_mean`, `acc_mag_min`, `acc_mag_max`, `acc_horiz_std`, `acc_horiz_min`, `acc_horiz_max`, `az_std`, `mean_az` | 8 | Under frictionless ballistic physics (assumption 2), vertical acceleration is constant at −g. Deviations from this baseline encode motor burn characteristics exclusively. `acc_mag_max` captures peak thrust magnitude, which varies by motor type and is the dominant class discriminator. `acc_horiz_min` captures the minimum lateral acceleration — a distinctive kinematic signature of each rocket class's thrust vector profile. |
 | **Vertical kinematics** — `vz_median`, `initial_vz`, `final_vz`, `initial_z`, `final_z`, `delta_z_total`, `apogee_relative` | 7 | The ballistic arc shape is uniquely determined by initial vertical velocity under flat-terrain physics (assumption 1). Different rocket types launch at different angles with different muzzle velocities, producing distinct arc heights and descent profiles. |
 | **Spatial extent** — `x_range`, `y_range` | 2 | Downrange distance is determined by horizontal muzzle velocity and time of flight — both vary by rocket type. Compact encodings of the trajectory footprint. |
 | **Launch position** — `launch_x`, `launch_y` | 2 | Per assumption 3c, each rebel group operates from a fixed geographic area and uses one rocket type. Launch coordinates are therefore a near-deterministic proxy for rocket class — the 2nd and 5th most important features by SHAP. |
