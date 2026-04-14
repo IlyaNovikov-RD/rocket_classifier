@@ -19,8 +19,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2,<10.0.0",
-    "ruff>=0.15.7,<0.16.0",
+    "pytest>=9.0.3,<10.0.0",
+    "ruff>=0.15.10,<0.16.0",
     "onnxmltools>=1.10,<2.0",
 ]
 research = [
