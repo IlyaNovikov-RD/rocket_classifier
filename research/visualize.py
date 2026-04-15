@@ -6,19 +6,18 @@ Generates ``assets/demo.png`` containing three subplots:
               the production model: Class 0 (moderate arc, 69 %),
               Class 1 (long-range flat, 24 %), Class 2 (steep short-range, 7 %).
               Apogee marked per class.  Colours match the Streamlit demo.
-    - Centre: Jerk Magnitude time-series for all three classes, computed via
-              ``_compute_derivatives`` (production code path).  The magnitude
-              and timing of the thrust-ignition spike differ across classes and
-              are among the key kinematic discriminators.
+    - Centre: Real training-data scatter of the top two SHAP-confirmed
+              non-geographic kinematic features: ``initial_z`` (SHAP rank 1,
+              mean |SHAP| 2.01) and ``v_horiz_median`` (SHAP rank 3, 0.98).
+              Per-class 2-sigma covariance ellipses show the class-conditional
+              distributions.  Both features are in ``SELECTED_FEATURES`` and
+              are used by the production model.
     - Right:  Real launch-site scatter from the training cache — every unique
               (launch_x, launch_y) coordinate, coloured by class.  Production
               DBSCAN (eps=0.25, min_samples=3) finds 1 dominant group containing
               99.7 % of trajectories, explaining why the rebel-group features
               have near-zero importance in the trained model.  Requires
               ``cache/cache_train_features.parquet`` (run ``make download-all``).
-
-Uses ``_compute_derivatives`` from ``rocket_classifier/features.py`` so that
-the kinematic panel reflects the same physics code path used in production.
 """
 
 import logging
@@ -33,8 +32,6 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-from rocket_classifier.features import _compute_derivatives
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +87,7 @@ def _ballistic(
 
     Returns:
         pos: (n, 3) position array in metres.
-        dt_arr: (n-1,) constant dt array for ``_compute_derivatives``.
+        dt_arr: (n-1,) constant dt array (uniform, for external use if needed).
     """
     g = 9.81
     theta = np.radians(theta_deg)
@@ -144,8 +141,7 @@ def generate_class2(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarra
     """Class 2 (7 %): Fastest, longest range — the rare high-capability rocket.
 
     Real data: initial_speed 1.77x, x_range 2.96x, apogee_relative 3.14x,
-    acc_mag_max 1.61x (stronger motor).  Flatter angle maximises range;
-    strong thrust produces the largest ignition spike in the jerk panel.
+    acc_mag_max 1.61x (stronger motor).  Flatter angle maximises range.
     All t_land values exceed 6 s (no ground-clamp artifact).
     """
     return _ballistic(
@@ -153,36 +149,31 @@ def generate_class2(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarra
     )
 
 
-def compute_jerk_magnitude(pos: np.ndarray, dt_arr: np.ndarray) -> np.ndarray:
-    """Compute per-timestep jerk magnitude using the production derivative pipeline."""
-    _, _, jerk = _compute_derivatives(pos, dt_arr)
-    if jerk.shape[0] == 0:
-        return np.array([])
-    return np.linalg.norm(jerk, axis=1)
-
-
 # ---------------------------------------------------------------------------
-# Real launch-site data from training cache
+# Real training-data loader
 # ---------------------------------------------------------------------------
 
 _CACHE_PATH = Path(__file__).parent.parent / "cache" / "cache_train_features.parquet"
 
 
 def load_real_launch_data() -> pd.DataFrame | None:
-    """Load launch positions and class labels from the training feature cache.
+    """Load training features and class labels from the training feature cache.
 
     Returns:
-        DataFrame with columns [launch_x, launch_y, label], or None if the
-        cache parquet is not present (run ``make download-all`` to fetch it).
+        DataFrame with columns [launch_x, launch_y, initial_z, v_horiz_median, label],
+        or None if the cache parquet is not present (run ``make download-all``).
     """
     if not _CACHE_PATH.exists():
         logger.warning(
-            "Training cache not found at %s — right panel will be blank. "
+            "Training cache not found at %s — centre and right panels will be blank. "
             "Run 'make download-all' to fetch it.",
             _CACHE_PATH,
         )
         return None
-    return pd.read_parquet(_CACHE_PATH, columns=["launch_x", "launch_y", "label"])
+    return pd.read_parquet(
+        _CACHE_PATH,
+        columns=["launch_x", "launch_y", "initial_z", "v_horiz_median", "label"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -192,16 +183,9 @@ def load_real_launch_data() -> pd.DataFrame | None:
 
 def make_demo_plot(output_path: Path) -> None:
     """Render and save the three-panel physics + salvo feature visualization."""
-    pos0, dt0 = generate_class0()
-    pos1, dt1 = generate_class1()
-    pos2, dt2 = generate_class2()
-
-    jerk0 = compute_jerk_magnitude(pos0, dt0)
-    jerk1 = compute_jerk_magnitude(pos1, dt1)
-    jerk2 = compute_jerk_magnitude(pos2, dt2)
-
-    dt = _DT
-    t_jerk = np.arange(len(jerk0)) * dt  # all classes have same n, so same length
+    pos0, _ = generate_class0()
+    pos1, _ = generate_class1()
+    pos2, _ = generate_class2()
 
     apogee = {
         0: int(np.argmax(pos0[:, 2])),
@@ -209,7 +193,6 @@ def make_demo_plot(output_path: Path) -> None:
         2: int(np.argmax(pos2[:, 2])),
     }
     positions = {0: pos0, 1: pos1, 2: pos2}
-    jerks = {0: jerk0, 1: jerk1, 2: jerk2}
 
     launch_df = load_real_launch_data()
 
@@ -285,53 +268,88 @@ def make_demo_plot(output_path: Path) -> None:
     )
     ax3d.view_init(elev=22, azim=-55)
 
-    # ── Centre: Jerk magnitude ─────────────────────────────────────────────────
+    # ── Centre: Real feature distributions (SHAP top kinematic features) ─────────
     ax2d.set_facecolor(PANEL_BG)
     ax2d.tick_params(colors=TEXT_COLOR, labelsize=9)
     for spine in ax2d.spines.values():
         spine.set_edgecolor(GRID_COLOR)
     ax2d.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.7)
 
-    for cls in (0, 1, 2):
-        jerk = jerks[cls]
-        t_j = np.arange(len(jerk)) * dt
-        ax2d.plot(
-            t_j,
-            jerk,
-            color=CLASS_COLOR[cls],
-            linewidth=2.0 if cls == 0 else 1.6,
-            linestyle=linestyles[cls],
-            label=CLASS_LABEL[cls],
+    if launch_df is not None:
+        # Subsample for visual clarity: cap Class 0 at 2000 so it doesn't drown
+        # Classes 1 and 2; show all of Class 2 (only 2,339 trajectories).
+        rng_sub = np.random.default_rng(seed=0)
+        sub_n = {0: 2000, 1: 2000, 2: len(launch_df[launch_df["label"] == 2])}
+        point_alphas = {0: 0.15, 1: 0.28, 2: 0.55}
+        point_sizes = {0: 5, 1: 7, 2: 11}
+
+        for cls in (0, 1, 2):
+            cls_df = launch_df[launch_df["label"] == cls]
+            n_draw = min(sub_n[cls], len(cls_df))
+            idx = rng_sub.choice(len(cls_df), size=n_draw, replace=False)
+            sub = cls_df.iloc[idx]
+
+            ax2d.scatter(
+                sub["initial_z"],
+                sub["v_horiz_median"],
+                c=CLASS_COLOR[cls],
+                s=point_sizes[cls],
+                alpha=point_alphas[cls],
+                linewidths=0,
+                zorder=2,
+                label=CLASS_LABEL[cls],
+            )
+
+            # 2-sigma covariance ellipse — uses full class data, not just the subsample
+            full = launch_df[launch_df["label"] == cls]
+            mu = np.array([full["initial_z"].mean(), full["v_horiz_median"].mean()])
+            cov = np.cov(full["initial_z"].values, full["v_horiz_median"].values)
+            eig_vals, eig_vecs = np.linalg.eigh(cov)
+            angle = np.degrees(np.arctan2(eig_vecs[1, -1], eig_vecs[0, -1]))
+            w, h = 2 * 2 * np.sqrt(np.abs(eig_vals))
+            ellipse = mpatches.Ellipse(
+                mu,
+                width=w,
+                height=h,
+                angle=angle,
+                fill=False,
+                edgecolor=CLASS_COLOR[cls],
+                linewidth=1.8,
+                linestyle="--",
+                alpha=0.85,
+                zorder=3,
+            )
+            ax2d.add_patch(ellipse)
+
+        center_title_suffix = f"({len(launch_df):,} trajectories · subsampled for display)"
+        ax2d.legend(fontsize=9, facecolor=PANEL_BG, edgecolor=GRID_COLOR, labelcolor=TEXT_COLOR)
+    else:
+        ax2d.text(
+            0.5,
+            0.5,
+            "Cache not found.\nRun 'make download-all'\nto see real features.",
+            transform=ax2d.transAxes,
+            ha="center",
+            va="center",
+            color=TEXT_COLOR,
+            fontsize=11,
         )
+        center_title_suffix = "(cache not found)"
 
-    # Annotate the Class 2 ignition spike — largest because Class 2 has the
-    # strongest motor (thrust_accel 160 vs 80/55 for Class 0/1), matching the
-    # real-data acc_mag_max ratio of 1.61x.
-    peak_idx2 = int(np.argmax(jerk2))
-    ax2d.annotate(
-        "Motor ignition\nspike (Class 2)",
-        xy=(t_jerk[peak_idx2], jerk2[peak_idx2]),
-        xytext=(t_jerk[peak_idx2] + 0.6, jerk2[peak_idx2] * 0.75),
-        color=RED,
-        fontsize=8.5,
-        fontweight="bold",
-        arrowprops={"arrowstyle": "->", "color": RED, "lw": 1.5},
+    ax2d.set_xlabel(
+        "initial_z  (SHAP rank 1 · mean|SHAP| 2.01)", color=TEXT_COLOR, fontsize=10, labelpad=6
     )
-
-    # Focus on the first 2 s to keep the ignition spikes front-and-centre;
-    # jerk falls to near-zero after all thrust phases have ended.
-    ax2d.set_xlim(0, 2.0)
-    ax2d.set_xlabel("Time (s)", color=TEXT_COLOR, fontsize=11, labelpad=6)
-    ax2d.set_ylabel("Jerk Magnitude  (m/s^3)", color=TEXT_COLOR, fontsize=11, labelpad=6)
+    ax2d.set_ylabel(
+        "v_horiz_median  (SHAP rank 3 · mean|SHAP| 0.98)", color=TEXT_COLOR, fontsize=10, labelpad=6
+    )
     ax2d.set_title(
-        "Jerk Magnitude Over Time\n(Kinematic feature — production code path)",
+        f"Key Kinematic Features — Real Training Data\n{center_title_suffix}",
         color=TEXT_COLOR,
         fontsize=11,
         fontweight="bold",
         pad=12,
     )
     ax2d.tick_params(axis="both", colors=TEXT_COLOR)
-    ax2d.legend(fontsize=9, facecolor=PANEL_BG, edgecolor=GRID_COLOR, labelcolor=TEXT_COLOR)
 
     # ── Right: Real launch-site scatter ───────────────────────────────────────
     ax_s.set_facecolor(PANEL_BG)
