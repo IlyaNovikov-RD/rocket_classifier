@@ -74,7 +74,7 @@ There are few rebel groups, each operating from a fixed geographic area. Critica
 | `group_n_salvos` | Number of distinct firing events from this base |
 | `group_max_salvo_size` | Largest single salvo (proxy for launcher type — assumption 3a) |
 
-**Empirical finding:** DBSCAN (on StandardScaler-normalised `(launch_x, launch_y)`, eps=0.25) finds **3 rebel groups** across all 32,741 trajectories. Individual exact-coordinate launch sites are class-exclusive (8,016 unique sites across 32,741 trajectories, zero cross-class overlap), confirming independent procurement at the site level. The group-level aggregate features carry **near-zero SHAP importance** in the trained model — the raw launch coordinates (`launch_x`, `launch_y`) already capture this signal directly and rank 2nd and 5th by SHAP.
+**Empirical finding:** DBSCAN (on StandardScaler-normalised `(launch_x, launch_y)`, eps=0.25) finds **3 geographic clusters**. KDE contour analysis reveals a nested structure: Class 1 and Class 2 each occupy their own concentrated cluster, while Class 0 appears both in a separate adjacent cluster *and* as an inner pocket at the core of each of the other two clusters. This suggests two of the three groups field both a specialised rocket type (Class 1 or 2) and the common Class 0, rather than a strict one-group-one-type mapping. Individual exact-coordinate launch sites remain class-exclusive (8,016 unique sites, zero cross-class overlap). The group-level aggregate features carry **near-zero SHAP importance** — the raw launch coordinates (`launch_x`, `launch_y`) already capture this signal directly (SHAP ranks 2 and 5).
 
 ---
 
