@@ -518,16 +518,16 @@ make interpret   # regenerates assets/shap_summary.png and assets/interpretation
 
 | Layer | Technology | Why |
 |---|---|---|
-| **Runtime** | Python 3.12 | PEP 709 comprehension inlining, improved error messages |
+| **Runtime** | Python 3.12 | Current stable release; all production deps ship pre-built wheels for 3.12 — no compilation from source in Docker or CI |
 | **ML** | LightGBM 4.x, scikit-learn | Leaf-wise gradient boosting, GPU-accelerated Optuna, GroupKFold |
-| **Clustering** | scikit-learn DBSCAN | Spatiotemporal salvo and geographic rebel-group identification |
+| **Clustering** | scikit-learn DBSCAN | Cluster count is unknown a priori — no pre-specified K required. ε maps to a physically interpretable radius (metres / degrees), and noise points (isolated rockets not part of any salvo) are a natural output rather than an error |
 | **Inference** | ONNX Runtime | ~2.6x faster than native LightGBM via AVX2 vectorisation |
 | **Validation** | Pydantic v2 | Schema enforcement on raw radar data |
 | **Explainability** | SHAP TreeExplainer | Exact Shapley values in O(TLD) time |
 | **Demo** | Streamlit, Plotly | Real-time 3D trajectory visualisation |
 | **Package management** | [uv](https://docs.astral.sh/uv/) | Deterministic lockfile, 10–100x faster than pip/poetry |
 | **CI** | GitHub Actions | Ruff lint + pytest on every push/PR |
-| **Caching** | Parquet + Feather (Arrow IPC) | Feature matrices cached; Feather is 2x faster to read |
+| **Caching** | Parquet + Feather (Arrow IPC) | Two formats for different access patterns: Parquet (compressed) for archival and GitHub Release distribution; Feather (Arrow IPC, uncompressed) for memory-mapped hot-path reads — switching to Parquet in the hot path added ~0.8s to inference wall time in benchmarks |
 
 ---
 
@@ -597,6 +597,14 @@ Radar stations (N radars across the operational theatre)
         ▼
   Operator dashboard  ──  Alert system
 ```
+
+### Streaming technology choices
+
+| Component | Why |
+|---|---|
+| **Apache Kafka** | Log-based durable message store — radar stations cannot replay a trajectory on demand. If Flink crashes mid-salvo, Kafka's retained log allows the topology to replay from the last committed offset and reconstruct the partial salvo without data loss. Partitioning by `traj_ind` provides horizontal scaling without application changes. |
+| **Apache Flink** | Required (over Kafka Streams or Spark Structured Streaming) for **event-time watermarks**: radar pings from the same trajectory arrive out of order across stations due to network jitter and scan-rate differences. Flink's keyed state with exactly-once semantics ensures salvo group membership is computed correctly even under late arrivals — a processing-time window would silently drop late pings and corrupt `salvo_size` and `salvo_time_rank`. |
+| **Redis** | Sub-millisecond atomic `SET key value EX ttl` for the two-phase update pattern (Phase 1 at ~100ms, Phase 2 at ~30s). The TTL feature self-expires stale predictions — a classification older than 5 minutes is no longer operationally actionable — without requiring a separate eviction job. |
 
 ### Online salvo detection
 
