@@ -339,9 +339,8 @@ def make_demo_plot(output_path: Path) -> None:
         # Paints a colour field showing which class "owns" each location.
         # Because sites are class-exclusive, 1-NN accuracy is ~100% — this
         # directly visualises why launch_x/y are SHAP ranks 2 & 5.
-        unique_sites = (
-            launch_df[["launch_x", "launch_y", "label"]]
-            .drop_duplicates(subset=["launch_x", "launch_y"])
+        unique_sites = launch_df[["launch_x", "launch_y", "label"]].drop_duplicates(
+            subset=["launch_x", "launch_y"]
         )
         knn = KNeighborsClassifier(n_neighbors=1, algorithm="kd_tree")
         knn.fit(unique_sites[["launch_x", "launch_y"]].values, unique_sites["label"].values)
