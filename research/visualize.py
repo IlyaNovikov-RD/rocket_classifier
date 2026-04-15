@@ -1,11 +1,13 @@
-"""Demo visualization of physics-informed and salvo-context features.
+"""Demo visualization — all three panels use 100 % real training data.
 
 Generates ``assets/demo.png`` containing three subplots:
 
-    - Left:   3D trajectory comparison — all three rocket classes produced by
-              the production model: Class 0 (moderate arc, 69 %),
-              Class 1 (long-range flat, 24 %), Class 2 (steep short-range, 7 %).
-              Apogee marked per class.  Colours match the Streamlit demo.
+    - Left:   3D trajectory comparison — one representative real radar track per
+              class (traj #50 Class 0, #126 Class 1, #554 Class 2), loaded
+              directly from ``data/train.csv``.  Trajectories are centred at the
+              launch origin for horizontal comparison while retaining true terrain
+              altitude so the ``initial_z`` (SHAP rank 1) difference is visible.
+              Colours match the Streamlit demo.
     - Centre: Real training-data scatter of the top two SHAP-confirmed
               non-geographic kinematic features: ``initial_z`` (SHAP rank 1,
               mean |SHAP| 2.01) and ``v_horiz_median`` (SHAP rank 3, 0.98).
@@ -16,8 +18,10 @@ Generates ``assets/demo.png`` containing three subplots:
               (launch_x, launch_y) coordinate, coloured by class.  Production
               DBSCAN (eps=0.25, min_samples=3) finds 1 dominant group containing
               99.7 % of trajectories, explaining why the rebel-group features
-              have near-zero importance in the trained model.  Requires
-              ``cache/cache_train_features.parquet`` (run ``make download-all``).
+              have near-zero importance in the trained model.
+
+All three panels require ``cache/cache_train_features.parquet`` and/or
+``data/train.csv`` (run ``make download-all`` to fetch both).
 """
 
 import logging
@@ -36,11 +40,6 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Reproducibility
-# ---------------------------------------------------------------------------
-RNG = np.random.default_rng(seed=42)
-
-# ---------------------------------------------------------------------------
 # Colour palette — class colours match the Streamlit app (app.py CLASS_COLORS)
 # ---------------------------------------------------------------------------
 DARK_BG = "#0d1117"
@@ -55,103 +54,65 @@ CLASS_COLOR = {0: GREEN, 1: GOLD, 2: RED}
 CLASS_LABEL = {0: "Class 0  (69 %)", 1: "Class 1  (24 %)", 2: "Class 2  (7 %)"}
 
 # ---------------------------------------------------------------------------
-# Synthetic trajectory generation — one generator per class
+# Real training-data loaders
 # ---------------------------------------------------------------------------
 
-_DT = 0.05
-_N = 120
-# Small position noise: 0.001 m keeps finite-difference noise amplification
-# (~sigma/dt^3) below ~35 m/s^3 so the thrust-ignition spike dominates.
-_POS_NOISE = 0.001
+_TRAIN_CSV_PATH = Path(__file__).parent.parent / "data" / "train.csv"
+
+# Representative trajectory IDs — one per class, chosen to be close to the
+# class median on (x_range, apogee_relative, n_points, initial_z).
+# Class 0 traj #50: 36m range, 7.6m apogee rise, 36 points, z0=9.4m
+# Class 1 traj #126: 28m range, 22.6m apogee rise, 38 points, z0=28.6m (high arc)
+# Class 2 traj #554: 115m range, 22.1m apogee rise, 67 points, z0=44.8m (long range)
+_REPR_TRAJ_IDS: dict[int, int] = {0: 50, 1: 126, 2: 554}
 
 
-def _ballistic(
-    speed: float,
-    theta_deg: float,
-    phi_deg: float,
-    thrust_accel: float,
-    thrust_frac: float,
-    n: int = _N,
-    dt: float = _DT,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Core ballistic trajectory shared by all three class generators.
+def load_real_trajectories() -> dict[int, np.ndarray] | None:
+    """Load one representative real radar trajectory per class from train.csv.
 
-    Args:
-        speed: Launch speed magnitude in m/s.
-        theta_deg: Elevation angle in degrees above horizontal.
-        phi_deg: Azimuth angle in degrees from x-axis.
-        thrust_accel: Peak motor-burn acceleration in m/s^2 (linearly ramped down).
-        thrust_frac: Fraction of total flight time over which thrust is active.
-        n: Number of position samples.
-        dt: Time step in seconds.
+    Trajectories are converted from training coordinate units to metres
+    (multiply by 300), with x/y centred at the launch point so all three
+    arcs share a common horizontal origin for visual comparison.  The z
+    coordinate retains its true terrain altitude so the ``initial_z``
+    (SHAP rank 1) difference between classes remains visible.
 
     Returns:
-        pos: (n, 3) position array in metres.
-        dt_arr: (n-1,) constant dt array (uniform, for external use if needed).
+        Dict mapping class label → (n, 3) position array in metres,
+        or None if ``data/train.csv`` is not present.
     """
-    g = 9.81
-    theta = np.radians(theta_deg)
-    phi = np.radians(phi_deg)
-    v0z = speed * np.sin(theta)
-    v0h = speed * np.cos(theta)
-    v0x = v0h * np.cos(phi)
-    v0y = v0h * np.sin(phi)
+    if not _TRAIN_CSV_PATH.exists():
+        logger.warning(
+            "train.csv not found at %s — left panel will be blank. "
+            "Run 'make download-all' to fetch it.",
+            _TRAIN_CSV_PATH,
+        )
+        return None
 
-    t = np.linspace(0, n * dt, n)
-    x = v0x * t
-    y = v0y * t
-    z = v0z * t - 0.5 * g * t**2
+    target_ids = set(_REPR_TRAJ_IDS.values())
+    rows: list[pd.DataFrame] = []
+    for chunk in pd.read_csv(_TRAIN_CSV_PATH, chunksize=50_000):
+        hit = chunk[chunk["traj_ind"].isin(target_ids)]
+        if len(hit):
+            rows.append(hit)
+        if rows and target_ids.issubset(set(pd.concat(rows)["traj_ind"].values)):
+            break
 
-    thrust_end = max(thrust_frac * t[-1], 1e-9)
-    thrust_profile = np.where(t <= thrust_end, thrust_accel * (1.0 - t / thrust_end), 0.0)
-    z += np.cumsum(thrust_profile) * dt**2
-    z = np.maximum(z, 0.0)
+    if not rows:
+        return None
 
-    x += RNG.normal(0, _POS_NOISE, n)
-    y += RNG.normal(0, _POS_NOISE, n)
-    z += RNG.normal(0, _POS_NOISE, n)
-    z = np.maximum(z, 0.0)
-    return np.column_stack([x, y, z]), np.full(n - 1, dt)
+    df = pd.concat(rows)
+    df["time_stamp"] = pd.to_datetime(df["time_stamp"])
 
+    result: dict[int, np.ndarray] = {}
+    for cls, tid in _REPR_TRAJ_IDS.items():
+        traj = df[df["traj_ind"] == tid].sort_values("time_stamp")
+        pos = traj[["x", "y", "z"]].values * 300.0  # training units → metres
+        pos[:, 0] -= pos[0, 0]  # centre x at launch origin
+        pos[:, 1] -= pos[0, 1]  # centre y at launch origin
+        # z stays absolute (terrain altitude) — initial_z is SHAP rank 1
+        result[cls] = pos
+    return result
 
-def generate_class0(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
-    """Class 0 (69 %): Slowest, shortest range — the common low-cost rocket.
-
-    Parameters scaled to match training-data medians (initial_speed ~1.0x baseline,
-    x_range ~1.0x baseline).  Moderate elevation, standard motor burn.
-    """
-    return _ballistic(
-        speed=38, theta_deg=62, phi_deg=25, thrust_accel=80, thrust_frac=0.10, n=n, dt=dt
-    )
-
-
-def generate_class1(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
-    """Class 1 (24 %): 1.35x faster, similar range to Class 0, higher apogee.
-
-    Real data: initial_speed 1.35x, x_range only 1.06x, apogee_relative 1.37x,
-    acc_mag_max 0.60x (smoother flight).  Steeper angle keeps range close to
-    Class 0 despite higher speed; lower thrust reflects smoother kinematics.
-    """
-    return _ballistic(
-        speed=51, theta_deg=68, phi_deg=20, thrust_accel=55, thrust_frac=0.12, n=n, dt=dt
-    )
-
-
-def generate_class2(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
-    """Class 2 (7 %): Fastest, longest range — the rare high-capability rocket.
-
-    Real data: initial_speed 1.77x, x_range 2.96x, apogee_relative 3.14x,
-    acc_mag_max 1.61x (stronger motor).  Flatter angle maximises range.
-    All t_land values exceed 6 s (no ground-clamp artifact).
-    """
-    return _ballistic(
-        speed=67, theta_deg=40, phi_deg=30, thrust_accel=160, thrust_frac=0.15, n=n, dt=dt
-    )
-
-
-# ---------------------------------------------------------------------------
-# Real training-data loader
-# ---------------------------------------------------------------------------
 
 _CACHE_PATH = Path(__file__).parent.parent / "cache" / "cache_train_features.parquet"
 
@@ -182,18 +143,8 @@ def load_real_launch_data() -> pd.DataFrame | None:
 
 
 def make_demo_plot(output_path: Path) -> None:
-    """Render and save the three-panel physics + salvo feature visualization."""
-    pos0, _ = generate_class0()
-    pos1, _ = generate_class1()
-    pos2, _ = generate_class2()
-
-    apogee = {
-        0: int(np.argmax(pos0[:, 2])),
-        1: int(np.argmax(pos1[:, 2])),
-        2: int(np.argmax(pos2[:, 2])),
-    }
-    positions = {0: pos0, 1: pos1, 2: pos2}
-
+    """Render and save the three-panel real-data visualization."""
+    traj_data = load_real_trajectories()
     launch_df = load_real_launch_data()
 
     # ── Figure layout ─────────────────────────────────────────────────────────
@@ -215,7 +166,7 @@ def make_demo_plot(output_path: Path) -> None:
     ax2d = fig.add_subplot(gs[1])
     ax_s = fig.add_subplot(gs[2])
 
-    # ── Left: 3D trajectory comparison ────────────────────────────────────────
+    # ── Left: 3D real radar tracks ─────────────────────────────────────────────
     ax3d.set_facecolor(PANEL_BG)
     for pane in [ax3d.xaxis.pane, ax3d.yaxis.pane, ax3d.zaxis.pane]:
         pane.fill = False
@@ -227,33 +178,51 @@ def make_demo_plot(output_path: Path) -> None:
     linestyles = {0: "-", 1: "--", 2: ":"}
     linewidths = {0: 2.2, 1: 2.0, 2: 2.0}
 
-    for cls in (0, 1, 2):
-        pos = positions[cls]
-        color = CLASS_COLOR[cls]
-        ax3d.plot(
-            *pos.T,
-            color=color,
-            linewidth=linewidths[cls],
-            linestyle=linestyles[cls],
-            label=CLASS_LABEL[cls],
-            zorder=3,
+    if traj_data is not None:
+        for cls in (0, 1, 2):
+            pos = traj_data[cls]
+            color = CLASS_COLOR[cls]
+            tid = _REPR_TRAJ_IDS[cls]
+            n_pts = len(pos)
+            x_rng = float(np.ptp(pos[:, 0]))
+            label = f"{CLASS_LABEL[cls]}  (traj #{tid} · {x_rng:.0f} m range · {n_pts} pts)"
+            ax3d.plot(
+                *pos.T,
+                color=color,
+                linewidth=linewidths[cls],
+                linestyle=linestyles[cls],
+                label=label,
+                zorder=3,
+            )
+            ax3d.scatter(*pos[0], color=color, s=50, zorder=5, depthshade=False)
+            aidx = int(np.argmax(pos[:, 2]))
+            ax3d.scatter(
+                *pos[aidx],
+                color=GOLD if cls == 0 else color,
+                s=100,
+                marker="*",
+                zorder=6,
+                depthshade=False,
+            )
+        left_title_suffix = "(real radar tracks — one per class)"
+    else:
+        ax3d.text2D(
+            0.5,
+            0.5,
+            "train.csv not found.\nRun 'make download-all'.",
+            transform=ax3d.transAxes,
+            ha="center",
+            va="center",
+            color=TEXT_COLOR,
+            fontsize=11,
         )
-        ax3d.scatter(*pos[0], color=color, s=50, zorder=5, depthshade=False)
-        aidx = apogee[cls]
-        ax3d.scatter(
-            *pos[aidx],
-            color=GOLD if cls == 0 else color,
-            s=100,
-            marker="*",
-            zorder=6,
-            depthshade=False,
-        )
+        left_title_suffix = "(train.csv not found)"
 
     ax3d.set_xlabel("X (m)", labelpad=6, fontsize=9)
     ax3d.set_ylabel("Y (m)", labelpad=6, fontsize=9)
     ax3d.set_zlabel("Altitude (m)", labelpad=6, fontsize=9)
     ax3d.set_title(
-        "3D Trajectory Comparison\n(synthetic — three production classes)",
+        f"3D Trajectory — Real Training Data\n{left_title_suffix}",
         color=TEXT_COLOR,
         fontsize=11,
         fontweight="bold",
@@ -261,7 +230,7 @@ def make_demo_plot(output_path: Path) -> None:
     )
     ax3d.legend(
         loc="upper left",
-        fontsize=8,
+        fontsize=7.5,
         facecolor=PANEL_BG,
         edgecolor=GRID_COLOR,
         labelcolor=TEXT_COLOR,
@@ -447,7 +416,7 @@ def make_demo_plot(output_path: Path) -> None:
 
     # ── Suptitle ──────────────────────────────────────────────────────────────
     fig.suptitle(
-        "Physics-Informed & Salvo-Context Feature Visualization",
+        "Rocket Trajectory Classifier — Real Training Data (32,741 trajectories)",
         color=TEXT_COLOR,
         fontsize=16,
         fontweight="bold",
