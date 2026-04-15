@@ -15,7 +15,7 @@
 
 ## What This Is
 
-A production-grade ML pipeline that classifies rocket types from radar-tracked 3D flight trajectories. Given a variable-length sequence of `(x, y, z, time_stamp)` radar observations, the system extracts physics-derived features — enriched with domain-specific salvo and rebel-group context — and predicts the rocket class (0, 1, or 2).
+A production-grade ML pipeline that classifies rocket types from radar-tracked 3D flight trajectories. Given a variable-length sequence of `(traj_ind, x, y, z, time_stamp)` radar observations, the system extracts physics-derived features — enriched with domain-specific salvo and rebel-group context — and predicts the rocket class (0, 1, or 2).
 
 ### The Core Challenge: Worst-Class Recall Under Severe Imbalance
 
@@ -162,7 +162,7 @@ A separate experiment tested a Transformer encoder operating on raw radar sequen
 ### Model Development Pipeline (Research — GPU, one-time)
 
 ```
-Raw radar pings (x, y, z, t)
+Raw radar pings (traj_ind, x, y, z, t)
     │
     ▼
 Kinematic Feature Engineering ──► 25 physics features per trajectory
