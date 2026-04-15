@@ -575,19 +575,22 @@ Radar stations (N radars across the operational theatre)
    ├─ Trajectory assembler
    │   Groups pings by traj_ind within a sliding time window
    │
-   ├─ Kinematic feature extractor ─────────────────────────────┐
-   │   Partial trajectory (≥ 3 pings) · Phase 1 (< 100ms)     │
-   │                                                            ▼
-   └─ Salvo coordinator ────────────────────────► ONNX serving endpoint
-       Online DBSCAN over recent launch positions  model.onnx · < 2ms/trajectory
-       Phase 2 (salvo confirmed, ~5–30s)                        │
-                                                                 ▼
-                                                      Prediction store (Redis)
-                                                      Keyed by traj_ind
-                                                      Updated by both phases
-                                                                 │
-                                                                 ▼
-                                                      Operator dashboard  ──  Alert system
+   ├─ Kinematic feature extractor ─────────────────────────┐
+   │   Partial trajectory (≥ 3 pings) · Phase 1 (< 100ms)  │
+   │                                                         │
+   └─ Salvo coordinator ───────────────────────────────────┤
+       Online DBSCAN · Phase 2 (salvo confirmed, ~5–30s)   │
+                                                            ▼
+                                                            ONNX serving endpoint
+                                                            model.onnx · < 2ms/trajectory
+                                                            │
+                                                            ▼
+                                                            Prediction store (Redis)
+                                                            Keyed by traj_ind
+                                                            Updated by both phases
+                                                            │
+                                                            ▼
+                                                            Operator dashboard  ──  Alert system
 ```
 
 ### Streaming technology choices
