@@ -368,8 +368,8 @@ def make_demo_plot(output_path: Path) -> None:
 
         # ── KDE contours per class — two levels: outer extent + dense core ───
         # Reveals the nested structure: Class 0 appears as three separate
-        # blobs — its own cluster plus inner pockets inside the Class 1 and
-        # Class 2 clusters.
+        # blobs — its own cluster plus independent Class 0 groups operating
+        # in proximity to the Class 1 and Class 2 clusters.
         bw = 0.07  # bandwidth in training coordinate units (~21 m)
         contour_levels = [0.12, 0.45]  # fraction of per-class peak density
         lw_outer, lw_inner = 1.0, 2.0
