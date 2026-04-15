@@ -2,12 +2,15 @@
 
 Generates ``assets/demo.png`` containing three subplots:
 
-    - Left:   3D trajectory comparison — ballistic Rocket (solid green) vs.
-              stochastic Noise/Other (dashed red), with apogee marked.
-    - Centre: Jerk Magnitude time-series computed via finite differences,
-              illustrating the sharp ignition spike that distinguishes
-              propelled rockets from passive or erratic objects.
-    - Right:  Salvo context — top-down launch-position view of two synthetic
+    - Left:   3D trajectory comparison — all three rocket classes produced by
+              the production model: Class 0 (moderate arc, 69 %),
+              Class 1 (long-range flat, 24 %), Class 2 (steep short-range, 7 %).
+              Apogee marked per class.  Colours match the Streamlit demo.
+    - Centre: Jerk Magnitude time-series for all three classes, computed via
+              ``_compute_derivatives`` (production code path).  The magnitude
+              and timing of the thrust-ignition spike differ across classes and
+              are among the key kinematic discriminators.
+    - Right:  Salvo context — top-down launch-position view of three synthetic
               rebel bases, each firing a 4-rocket salvo in sequence.
               Illustrates domain assumption 3b (rockets fired in salvos) and
               the ``salvo_time_rank`` feature (rank 12 in production model).
@@ -38,57 +41,104 @@ logger = logging.getLogger(__name__)
 RNG = np.random.default_rng(seed=42)
 
 # ---------------------------------------------------------------------------
-# Colour palette
+# Colour palette — class colours match the Streamlit app (app.py CLASS_COLORS)
 # ---------------------------------------------------------------------------
 DARK_BG = "#0d1117"
 PANEL_BG = "#161b22"
 GRID_COLOR = "#30363d"
 TEXT_COLOR = "#e6edf3"
-GREEN = "#3fb950"
-RED = "#f85149"
-GOLD = "#f0c040"
-BLUE = "#58a6ff"
-ORANGE = "#ffa657"
+GREEN = "#3fb950"  # Class 0
+GOLD = "#f0c040"  # Class 1
+RED = "#f85149"  # Class 2
+BLUE = "#58a6ff"  # salvo base accent
+ORANGE = "#ffa657"  # salvo base accent
+
+CLASS_COLOR = {0: GREEN, 1: GOLD, 2: RED}
+CLASS_LABEL = {0: "Class 0  (69 %)", 1: "Class 1  (24 %)", 2: "Class 2  (7 %)"}
 
 # ---------------------------------------------------------------------------
-# Synthetic trajectory generation
+# Synthetic trajectory generation — one generator per class
 # ---------------------------------------------------------------------------
 
+_DT = 0.05
+_N = 120
+# Small position noise: 0.001 m keeps finite-difference noise amplification
+# (~sigma/dt^3) below ~35 m/s^3 so the thrust-ignition spike dominates.
+_POS_NOISE = 0.001
 
-def generate_rocket(n: int = 120, dt: float = 0.05) -> tuple[np.ndarray, np.ndarray]:
-    """Generate a synthetic ballistic trajectory with an initial thrust phase."""
+
+def _ballistic(
+    speed: float,
+    theta_deg: float,
+    phi_deg: float,
+    thrust_accel: float,
+    thrust_frac: float,
+    n: int = _N,
+    dt: float = _DT,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Core ballistic trajectory shared by all three class generators.
+
+    Args:
+        speed: Launch speed magnitude in m/s.
+        theta_deg: Elevation angle in degrees above horizontal.
+        phi_deg: Azimuth angle in degrees from x-axis.
+        thrust_accel: Peak motor-burn acceleration in m/s^2 (linearly ramped down).
+        thrust_frac: Fraction of total flight time over which thrust is active.
+        n: Number of position samples.
+        dt: Time step in seconds.
+
+    Returns:
+        pos: (n, 3) position array in metres.
+        dt_arr: (n-1,) constant dt array for ``_compute_derivatives``.
+    """
     g = 9.81
-    v0x, v0y, v0z = 18.0, 12.0, 55.0
-    thrust_duration = 0.10
+    theta = np.radians(theta_deg)
+    phi = np.radians(phi_deg)
+    v0z = speed * np.sin(theta)
+    v0h = speed * np.cos(theta)
+    v0x = v0h * np.cos(phi)
+    v0y = v0h * np.sin(phi)
 
     t = np.linspace(0, n * dt, n)
     x = v0x * t
     y = v0y * t
     z = v0z * t - 0.5 * g * t**2
 
-    thrust_mask = t < thrust_duration * t[-1]
-    thrust_profile = np.where(thrust_mask, 80.0 * (1 - t / (thrust_duration * t[-1])), 0.0)
+    thrust_end = max(thrust_frac * t[-1], 1e-9)
+    thrust_profile = np.where(t <= thrust_end, thrust_accel * (1.0 - t / thrust_end), 0.0)
     z += np.cumsum(thrust_profile) * dt**2
+    z = np.maximum(z, 0.0)
 
-    x += RNG.normal(0, 0.05, n)
-    y += RNG.normal(0, 0.05, n)
-    z += RNG.normal(0, 0.05, n)
+    x += RNG.normal(0, _POS_NOISE, n)
+    y += RNG.normal(0, _POS_NOISE, n)
+    z += RNG.normal(0, _POS_NOISE, n)
+    z = np.maximum(z, 0.0)
+    return np.column_stack([x, y, z]), np.full(n - 1, dt)
 
-    pos = np.column_stack([x, y, z])
-    return pos, np.full(n - 1, dt)
+
+def generate_class0(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
+    """Class 0 (69 %): Moderate speed, clear ballistic arc, standard motor burn."""
+    return _ballistic(
+        speed=55, theta_deg=60, phi_deg=25, thrust_accel=80, thrust_frac=0.10, n=n, dt=dt
+    )
 
 
-def generate_noise(n: int = 120, dt: float = 0.05) -> tuple[np.ndarray, np.ndarray]:
-    """Generate a high-jitter stochastic trajectory (non-ballistic object)."""
-    base_vx = RNG.uniform(5, 15)
-    base_vz = RNG.uniform(2, 8)
+def generate_class1(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
+    """Class 1 (24 %): Higher speed, flatter longer-range arc, prolonged strong thrust."""
+    return _ballistic(
+        speed=80, theta_deg=40, phi_deg=20, thrust_accel=160, thrust_frac=0.15, n=n, dt=dt
+    )
 
-    x = np.cumsum(base_vx * dt + RNG.normal(0, 1.2, n))
-    y = np.cumsum(RNG.normal(0, 1.0, n))
-    z = np.maximum(np.cumsum(base_vz * dt + RNG.normal(0, 1.8, n)), 0.0)
 
-    pos = np.column_stack([x, y, z])
-    return pos, np.full(n - 1, dt)
+def generate_class2(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
+    """Class 2 (7 %): Lower speed, steep short-range arc, minimal motor burn.
+
+    speed=35 chosen so t_land ≈ 6.9s > n*dt=6s, avoiding a ground-clamp
+    discontinuity that would create an artifact jerk spike inside the window.
+    """
+    return _ballistic(
+        speed=35, theta_deg=75, phi_deg=30, thrust_accel=25, thrust_frac=0.05, n=n, dt=dt
+    )
 
 
 def compute_jerk_magnitude(pos: np.ndarray, dt_arr: np.ndarray) -> np.ndarray:
@@ -105,21 +155,21 @@ def compute_jerk_magnitude(pos: np.ndarray, dt_arr: np.ndarray) -> np.ndarray:
 
 
 def generate_salvo_data() -> tuple[list, list]:
-    """Generate two synthetic rebel bases, each firing a 4-rocket salvo.
+    """Generate three synthetic rebel bases, each firing a 4-rocket salvo.
 
     Returns:
-        (bases, salvos) where each base is a dict with 'center' and 'color',
-        and each salvo is a list of (launch_x, launch_y, rank) tuples.
+        (bases, salvos) where each base is a dict with 'center', 'color', and
+        'label', and each salvo is a list of (launch_x, launch_y, rank) tuples.
     """
     bases = [
-        {"center": np.array([2.0, 3.0]), "color": GREEN, "label": "Base A"},
+        {"center": np.array([1.5, 3.5]), "color": BLUE, "label": "Base A"},
         {"center": np.array([7.0, 1.5]), "color": ORANGE, "label": "Base B"},
+        {"center": np.array([4.5, 7.0]), "color": GREEN, "label": "Base C"},
     ]
 
     salvos = []
     for base in bases:
         cx, cy = base["center"]
-        # 4 rockets per salvo: small spatial scatter around the base
         angles = RNG.uniform(0, 2 * np.pi, 4)
         radii = RNG.uniform(0.05, 0.25, 4)
         points = [
@@ -138,16 +188,24 @@ def generate_salvo_data() -> tuple[list, list]:
 
 def make_demo_plot(output_path: Path) -> None:
     """Render and save the three-panel physics + salvo feature visualization."""
-    rocket_pos, rocket_dt = generate_rocket()
-    noise_pos, noise_dt = generate_noise()
+    pos0, dt0 = generate_class0()
+    pos1, dt1 = generate_class1()
+    pos2, dt2 = generate_class2()
 
-    rocket_jerk = compute_jerk_magnitude(rocket_pos, rocket_dt)
-    noise_jerk = compute_jerk_magnitude(noise_pos, noise_dt)
+    jerk0 = compute_jerk_magnitude(pos0, dt0)
+    jerk1 = compute_jerk_magnitude(pos1, dt1)
+    jerk2 = compute_jerk_magnitude(pos2, dt2)
 
-    dt = rocket_dt[0]
-    t_jerk_rocket = np.arange(len(rocket_jerk)) * dt
-    t_jerk_noise = np.arange(len(noise_jerk)) * dt
-    apogee_idx = int(np.argmax(rocket_pos[:, 2]))
+    dt = _DT
+    t_jerk = np.arange(len(jerk0)) * dt  # all classes have same n, so same length
+
+    apogee = {
+        0: int(np.argmax(pos0[:, 2])),
+        1: int(np.argmax(pos1[:, 2])),
+        2: int(np.argmax(pos2[:, 2])),
+    }
+    positions = {0: pos0, 1: pos1, 2: pos2}
+    jerks = {0: jerk0, 1: jerk1, 2: jerk2}
 
     bases, salvos = generate_salvo_data()
 
@@ -179,41 +237,40 @@ def make_demo_plot(output_path: Path) -> None:
     for axis in [ax3d.xaxis, ax3d.yaxis, ax3d.zaxis]:
         axis.label.set_color(TEXT_COLOR)
 
-    ax3d.plot(*rocket_pos.T, color=GREEN, linewidth=2.2, label="Rocket (Ballistic)", zorder=3)
-    ax3d.plot(
-        *noise_pos.T,
-        color=RED,
-        linewidth=1.6,
-        linestyle="--",
-        alpha=0.85,
-        label="Other (Noise)",
-        zorder=2,
-    )
-    ax3d.scatter(*rocket_pos[0], color=GREEN, s=60, zorder=5, depthshade=False)
-    ax3d.scatter(*noise_pos[0], color=RED, s=60, zorder=5, depthshade=False)
-    ax3d.scatter(
-        *rocket_pos[apogee_idx],
-        color=GOLD,
-        s=120,
-        marker="*",
-        zorder=6,
-        depthshade=False,
-        label="Apogee",
-    )
-    ax3d.text(
-        rocket_pos[apogee_idx, 0] + 1.5,
-        rocket_pos[apogee_idx, 1] + 1.5,
-        rocket_pos[apogee_idx, 2] + 2.0,
-        "Apogee",
-        color=GOLD,
-        fontsize=9,
-        fontweight="bold",
-    )
+    linestyles = {0: "-", 1: "--", 2: ":"}
+    linewidths = {0: 2.2, 1: 2.0, 2: 2.0}
+
+    for cls in (0, 1, 2):
+        pos = positions[cls]
+        color = CLASS_COLOR[cls]
+        ax3d.plot(
+            *pos.T,
+            color=color,
+            linewidth=linewidths[cls],
+            linestyle=linestyles[cls],
+            label=CLASS_LABEL[cls],
+            zorder=3,
+        )
+        ax3d.scatter(*pos[0], color=color, s=50, zorder=5, depthshade=False)
+        aidx = apogee[cls]
+        ax3d.scatter(
+            *pos[aidx],
+            color=GOLD if cls == 0 else color,
+            s=100,
+            marker="*",
+            zorder=6,
+            depthshade=False,
+        )
+
     ax3d.set_xlabel("X (m)", labelpad=6, fontsize=9)
     ax3d.set_ylabel("Y (m)", labelpad=6, fontsize=9)
-    ax3d.set_zlabel("Z — Altitude (m)", labelpad=6, fontsize=9)
+    ax3d.set_zlabel("Altitude (m)", labelpad=6, fontsize=9)
     ax3d.set_title(
-        "3D Trajectory Comparison", color=TEXT_COLOR, fontsize=12, fontweight="bold", pad=12
+        "3D Trajectory Comparison\n(synthetic — three production classes)",
+        color=TEXT_COLOR,
+        fontsize=11,
+        fontweight="bold",
+        pad=12,
     )
     ax3d.legend(
         loc="upper left",
@@ -231,33 +288,41 @@ def make_demo_plot(output_path: Path) -> None:
         spine.set_edgecolor(GRID_COLOR)
     ax2d.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.7)
 
-    ax2d.plot(t_jerk_rocket, rocket_jerk, color=GREEN, linewidth=2.0, label="Rocket (Ballistic)")
-    ax2d.plot(
-        t_jerk_noise,
-        noise_jerk,
-        color=RED,
-        linewidth=1.4,
-        linestyle="--",
-        alpha=0.85,
-        label="Other (Noise)",
-    )
+    for cls in (0, 1, 2):
+        jerk = jerks[cls]
+        t_j = np.arange(len(jerk)) * dt
+        ax2d.plot(
+            t_j,
+            jerk,
+            color=CLASS_COLOR[cls],
+            linewidth=2.0 if cls == 0 else 1.6,
+            linestyle=linestyles[cls],
+            label=CLASS_LABEL[cls],
+        )
 
-    peak_idx = int(np.argmax(rocket_jerk))
+    # Annotate the Class 1 ignition spike (largest, most visible).
+    # Thrust ramps linearly from max → 0, so the abrupt acceleration step is
+    # at ignition (t≈0), not at thrust-end where acceleration is already ~0.
+    peak_idx = int(np.argmax(jerk1))
     ax2d.annotate(
-        "Thrust\nIgnition\nSpike",
-        xy=(t_jerk_rocket[peak_idx], rocket_jerk[peak_idx]),
-        xytext=(t_jerk_rocket[peak_idx] + 0.4, rocket_jerk[peak_idx] * 0.85),
+        "Motor ignition\nspike (Class 1)",
+        xy=(t_jerk[peak_idx], jerk1[peak_idx]),
+        xytext=(t_jerk[peak_idx] + 0.6, jerk1[peak_idx] * 0.75),
         color=GOLD,
         fontsize=8.5,
         fontweight="bold",
         arrowprops={"arrowstyle": "->", "color": GOLD, "lw": 1.5},
     )
+
+    # Focus on the first 2 s to keep the ignition spikes front-and-centre;
+    # jerk falls to near-zero after all thrust phases have ended.
+    ax2d.set_xlim(0, 2.0)
     ax2d.set_xlabel("Time (s)", color=TEXT_COLOR, fontsize=11, labelpad=6)
-    ax2d.set_ylabel("Jerk Magnitude  (m/s³)", color=TEXT_COLOR, fontsize=11, labelpad=6)
+    ax2d.set_ylabel("Jerk Magnitude  (m/s^3)", color=TEXT_COLOR, fontsize=11, labelpad=6)
     ax2d.set_title(
         "Jerk Magnitude Over Time\n(Kinematic feature — production code path)",
         color=TEXT_COLOR,
-        fontsize=12,
+        fontsize=11,
         fontweight="bold",
         pad=12,
     )
@@ -277,7 +342,6 @@ def make_demo_plot(output_path: Path) -> None:
         cx, cy = base["center"]
         color = base["color"]
 
-        # Base perimeter circle (geographic concentration — assumption 3c)
         circle = mpatches.Circle(
             (cx, cy),
             radius=0.45,
@@ -292,11 +356,9 @@ def make_demo_plot(output_path: Path) -> None:
             cx, cy + 0.55, base["label"], color=color, fontsize=8.5, fontweight="bold", ha="center"
         )
 
-        # Draw rockets in salvo order, connected by a dashed arrow sequence
         xs = [p[0] for p in salvo]
         ys = [p[1] for p in salvo]
 
-        # Arrows connecting rank 1→2→3→4
         for i in range(len(salvo) - 1):
             ax_s.annotate(
                 "",
@@ -305,13 +367,11 @@ def make_demo_plot(output_path: Path) -> None:
                 arrowprops={"arrowstyle": "->", "color": TEXT_COLOR, "lw": 0.9, "alpha": 0.55},
             )
 
-        # Scatter each rocket, coloured by rank
         for rx, ry, rank in salvo:
             rc = rank_colors[rank - 1]
             ax_s.scatter(rx, ry, s=120, color=rc, zorder=5, edgecolors=TEXT_COLOR, linewidths=0.6)
             ax_s.text(rx + 0.06, ry + 0.07, f"#{rank}", color=rc, fontsize=8, fontweight="bold")
 
-    # Legend for rank colours
     rank_handles = [
         mpatches.Patch(color=rank_colors[i], label=f"Salvo rank {i + 1}") for i in range(4)
     ]
@@ -329,13 +389,13 @@ def make_demo_plot(output_path: Path) -> None:
     ax_s.set_title(
         "Salvo Context: Launch Sequence\n(assumption 3b — salvo_time_rank, rank 12 in model)",
         color=TEXT_COLOR,
-        fontsize=12,
+        fontsize=11,
         fontweight="bold",
         pad=12,
     )
     ax_s.tick_params(axis="both", colors=TEXT_COLOR)
     ax_s.set_xlim(0, 10)
-    ax_s.set_ylim(-0.5, 5)
+    ax_s.set_ylim(-0.5, 9)
     ax_s.set_aspect("equal")
 
     # ── Suptitle ──────────────────────────────────────────────────────────────
