@@ -568,34 +568,26 @@ Phase 1 already satisfies the "as early as possible" requirement from the assign
 Radar stations (N radars across the operational theatre)
         │  raw pings (x, y, z, t, radar_id)
         ▼
-   Apache Kafka  ──────────────────────────────────┐
-        │  topic: radar-pings                       │
-        ▼                                           │
-  Apache Flink (stream processor)                   │
-   ├─ Trajectory assembler                          │
-   │   Groups pings by traj_ind within a           │
-   │   sliding time window                          │
-   │                                                │
-   ├─ Kinematic feature extractor                   │
-   │   Runs on partial trajectory (≥ 3 pings)      │
-   │   Triggers Phase 1 classification              │
-   │                                                │
-   └─ Salvo coordinator                             │
-       Online DBSCAN over recent launch positions   │
-       Triggers Phase 2 when salvo membership       │
-       is confirmed                                 │
-        │                                           │
-        ▼                                           │
-  ONNX serving endpoint (model.onnx)                │
-  < 2ms per trajectory, all cores                   │
-        │                                           │
-        ▼                                           │
-  Prediction store (Redis)  ◄────────────────────┘
-  Keyed by traj_ind
-  Updated by both phases
+   Apache Kafka  ·  topic: radar-pings
         │
         ▼
-  Operator dashboard  ──  Alert system
+  Apache Flink (stream processor)
+   ├─ Trajectory assembler
+   │   Groups pings by traj_ind within a sliding time window
+   │
+   ├─ Kinematic feature extractor ─────────────────────────────┐
+   │   Partial trajectory (≥ 3 pings) · Phase 1 (< 100ms)     │
+   │                                                            ▼
+   └─ Salvo coordinator ────────────────────────► ONNX serving endpoint
+       Online DBSCAN over recent launch positions  model.onnx · < 2ms/trajectory
+       Phase 2 (salvo confirmed, ~5–30s)                        │
+                                                                 ▼
+                                                      Prediction store (Redis)
+                                                      Keyed by traj_ind
+                                                      Updated by both phases
+                                                                 │
+                                                                 ▼
+                                                      Operator dashboard  ──  Alert system
 ```
 
 ### Streaming technology choices
