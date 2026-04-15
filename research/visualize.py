@@ -118,27 +118,38 @@ def _ballistic(
 
 
 def generate_class0(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
-    """Class 0 (69 %): Moderate speed, clear ballistic arc, standard motor burn."""
+    """Class 0 (69 %): Slowest, shortest range — the common low-cost rocket.
+
+    Parameters scaled to match training-data medians (initial_speed ~1.0x baseline,
+    x_range ~1.0x baseline).  Moderate elevation, standard motor burn.
+    """
     return _ballistic(
-        speed=55, theta_deg=60, phi_deg=25, thrust_accel=80, thrust_frac=0.10, n=n, dt=dt
+        speed=38, theta_deg=62, phi_deg=25, thrust_accel=80, thrust_frac=0.10, n=n, dt=dt
     )
 
 
 def generate_class1(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
-    """Class 1 (24 %): Higher speed, flatter longer-range arc, prolonged strong thrust."""
+    """Class 1 (24 %): 1.35x faster, similar range to Class 0, higher apogee.
+
+    Real data: initial_speed 1.35x, x_range only 1.06x, apogee_relative 1.37x,
+    acc_mag_max 0.60x (smoother flight).  Steeper angle keeps range close to
+    Class 0 despite higher speed; lower thrust reflects smoother kinematics.
+    """
     return _ballistic(
-        speed=80, theta_deg=40, phi_deg=20, thrust_accel=160, thrust_frac=0.15, n=n, dt=dt
+        speed=51, theta_deg=68, phi_deg=20, thrust_accel=55, thrust_frac=0.12, n=n, dt=dt
     )
 
 
 def generate_class2(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
-    """Class 2 (7 %): Lower speed, steep short-range arc, minimal motor burn.
+    """Class 2 (7 %): Fastest, longest range — the rare high-capability rocket.
 
-    speed=35 chosen so t_land ~= 6.9s > n*dt=6s, avoiding a ground-clamp
-    discontinuity that would create an artifact jerk spike inside the window.
+    Real data: initial_speed 1.77x, x_range 2.96x, apogee_relative 3.14x,
+    acc_mag_max 1.61x (stronger motor).  Flatter angle maximises range;
+    strong thrust produces the largest ignition spike in the jerk panel.
+    All t_land values exceed 6 s (no ground-clamp artifact).
     """
     return _ballistic(
-        speed=35, theta_deg=75, phi_deg=30, thrust_accel=25, thrust_frac=0.05, n=n, dt=dt
+        speed=67, theta_deg=40, phi_deg=30, thrust_accel=160, thrust_frac=0.15, n=n, dt=dt
     )
 
 
@@ -293,18 +304,18 @@ def make_demo_plot(output_path: Path) -> None:
             label=CLASS_LABEL[cls],
         )
 
-    # Annotate the Class 1 ignition spike (largest, most visible).
-    # Thrust ramps linearly from max -> 0, so the abrupt acceleration step is
-    # at ignition (t~=0), not at thrust-end where acceleration is already ~0.
-    peak_idx = int(np.argmax(jerk1))
+    # Annotate the Class 2 ignition spike — largest because Class 2 has the
+    # strongest motor (thrust_accel 160 vs 80/55 for Class 0/1), matching the
+    # real-data acc_mag_max ratio of 1.61x.
+    peak_idx2 = int(np.argmax(jerk2))
     ax2d.annotate(
-        "Motor ignition\nspike (Class 1)",
-        xy=(t_jerk[peak_idx], jerk1[peak_idx]),
-        xytext=(t_jerk[peak_idx] + 0.6, jerk1[peak_idx] * 0.75),
-        color=GOLD,
+        "Motor ignition\nspike (Class 2)",
+        xy=(t_jerk[peak_idx2], jerk2[peak_idx2]),
+        xytext=(t_jerk[peak_idx2] + 0.6, jerk2[peak_idx2] * 0.75),
+        color=RED,
         fontsize=8.5,
         fontweight="bold",
-        arrowprops={"arrowstyle": "->", "color": GOLD, "lw": 1.5},
+        arrowprops={"arrowstyle": "->", "color": RED, "lw": 1.5},
     )
 
     # Focus on the first 2 s to keep the ignition spikes front-and-centre;
