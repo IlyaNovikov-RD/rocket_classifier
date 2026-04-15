@@ -14,12 +14,12 @@ Generates ``assets/demo.png`` containing three subplots:
               Per-class 2-sigma covariance ellipses show the class-conditional
               distributions.  Both features are in ``SELECTED_FEATURES`` and
               are used by the production model.
-    - Right:  Launch-site decision map — a 1-NN classifier trained on the
+    - Right:  Launch-site decision map — a 15-NN classifier trained on the
               8,016 class-exclusive (launch_x, launch_y) sites paints the
-              background to show which class "owns" each location.  Unique
-              sites are scattered on top.  Directly visualises why launch_x
-              and launch_y are SHAP ranks 2 and 5: knowing where a rocket
-              launched almost determines its class.
+              background to show the dominant class in each neighbourhood.
+              Unique sites are scattered on top.  Directly visualises why
+              launch_x and launch_y are SHAP ranks 2 and 5: knowing where
+              a rocket launched almost determines its class.
 
 All three panels require ``cache/cache_train_features.parquet`` and/or
 ``data/train.csv`` (run ``make download-all`` to fetch both).
@@ -329,30 +329,59 @@ def make_demo_plot(output_path: Path) -> None:
     ax_s.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.4)
 
     if launch_df is not None:
-        from matplotlib.colors import ListedColormap
         from sklearn.neighbors import KNeighborsClassifier
 
         n_total = len(launch_df)
         class_counts = launch_df["label"].value_counts().sort_index().to_dict()
 
-        # ── Decision background: 1-NN on unique sites → class ────────────────
-        # Paints a colour field showing which class "owns" each location.
-        # Because sites are class-exclusive, 1-NN accuracy is ~100% — this
-        # directly visualises why launch_x/y are SHAP ranks 2 & 5.
+        # ── Decision background: 15-NN on unique sites → class ───────────────
+        # Shows the dominant class in each neighbourhood, faded out in the
+        # empty periphery so only regions near actual training sites are lit.
         unique_sites = launch_df[["launch_x", "launch_y", "label"]].drop_duplicates(
             subset=["launch_x", "launch_y"]
         )
-        knn = KNeighborsClassifier(n_neighbors=1, algorithm="kd_tree")
-        knn.fit(unique_sites[["launch_x", "launch_y"]].values, unique_sites["label"].values)
+        site_xy = unique_sites[["launch_x", "launch_y"]].values
+        site_labels = unique_sites["label"].values
+
+        knn = KNeighborsClassifier(n_neighbors=15, algorithm="kd_tree")
+        knn.fit(site_xy, site_labels)
 
         margin = 0.05
         x0, x1 = launch_df["launch_x"].min() - margin, launch_df["launch_x"].max() + margin
         y0, y1 = launch_df["launch_y"].min() - margin, launch_df["launch_y"].max() + margin
         xx, yy = np.meshgrid(np.linspace(x0, x1, 350), np.linspace(y0, y1, 350))
-        Z = knn.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+        grid_pts = np.c_[xx.ravel(), yy.ravel()]
+        Z = knn.predict(grid_pts).reshape(xx.shape)
 
-        cmap_bg = ListedColormap([GREEN, GOLD, RED])
-        ax_s.pcolormesh(xx, yy, Z, cmap=cmap_bg, alpha=0.18, zorder=1, shading="auto")
+        # Distance-based alpha: fade to 0 beyond ~4x the median site spacing
+        # so the empty outer margin stays dark instead of red.
+        from sklearn.neighbors import NearestNeighbors
+
+        nn1 = NearestNeighbors(n_neighbors=2, algorithm="kd_tree").fit(site_xy)
+        median_spacing = float(np.median(nn1.kneighbors(site_xy)[0][:, 1]))
+        fade_scale = median_spacing * 4
+        dists_grid = nn1.kneighbors(grid_pts, n_neighbors=1)[0].reshape(xx.shape)
+        alpha_grid = (0.30 * np.exp(-((dists_grid / fade_scale) ** 2))).clip(0, 0.30)
+
+        class_rgb = {
+            0: tuple(int(GREEN.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4)),
+            1: tuple(int(GOLD.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4)),
+            2: tuple(int(RED.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4)),
+        }
+        h, w = xx.shape
+        rgba = np.zeros((h, w, 4), dtype=np.float32)
+        for cls, rgb in class_rgb.items():
+            rgba[Z == cls, :3] = rgb
+        rgba[:, :, 3] = alpha_grid
+
+        ax_s.imshow(
+            rgba,
+            extent=[x0, x1, y0, y1],
+            origin="lower",
+            aspect="auto",
+            interpolation="bilinear",
+            zorder=1,
+        )
 
         # ── Scatter: unique sites per class on top ────────────────────────────
         sizes = {0: 4, 1: 7, 2: 12}
@@ -379,7 +408,7 @@ def make_demo_plot(output_path: Path) -> None:
         ax_s.text(
             0.02,
             0.98,
-            f"Background: 1-NN decision regions from {n_unique:,} class-exclusive sites\n"
+            f"Background: 15-NN decision regions from {n_unique:,} class-exclusive sites\n"
             "launch_x / launch_y  —  SHAP ranks 2 & 5",
             transform=ax_s.transAxes,
             color=TEXT_COLOR,
