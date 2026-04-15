@@ -66,7 +66,7 @@ Rockets are typically fired together or with a short delay. Spatiotemporal DBSCA
 `salvo_time_rank` is the most discriminative of these, ranking 12th in model feature importance — rockets fired later in a salvo carry a detectable kinematic imprint.
 
 ### 3c — Few concentrated rebel groups, each purchasing independently
-There are few rebel groups, each operating from a fixed geographic area. Critically, **each group purchases its own rocket supply independently** — they are not organised under a single umbrella organisation. This means every group stocks one rocket type. Pure-spatial DBSCAN on `(launch_x, launch_y)` identifies 15 persistent rebel bases and produces group-level features:
+There are few rebel groups, each operating from a fixed geographic area. Critically, **each group purchases its own rocket supply independently** — they are not organised under a single umbrella organisation. This means every group stocks one rocket type. Pure-spatial DBSCAN on `(launch_x, launch_y)` (eps=0.25, min_samples=3) produces group-level features:
 
 | Feature | Description |
 |---|---|
@@ -74,7 +74,7 @@ There are few rebel groups, each operating from a fixed geographic area. Critica
 | `group_n_salvos` | Number of distinct firing events from this base |
 | `group_max_salvo_size` | Largest single salvo (proxy for launcher type — assumption 3a) |
 
-**Empirical validation:** 97.4% class purity within same-salvo rockets — confirming the independent procurement assumption holds strongly in the data.
+**Empirical finding:** DBSCAN finds **1 dominant group** containing 99.7% of all 32,741 trajectories (32,652 of 32,741). All three rocket classes launch from the same geographic region — the assumption of spatially isolated rebel bases does not hold in this dataset. As a result, the group-level features have **near-zero SHAP importance** in the trained model (they are retained for completeness but contribute negligibly to predictions). Individual exact-coordinate launch sites *are* class-exclusive (8,016 unique sites across 32,741 trajectories, zero cross-class overlap), confirming independent procurement at the site level — but spatial proximity does not separate classes.
 
 ---
 
