@@ -8,13 +8,30 @@ Model: LightGBM (32 selected features — 25 kinematic + 7 salvo/group).
        Trained via research/train.py → 1.000000 OOB min-recall with
        proximity consensus (0.999874 raw).
 
-Note on salvo/group features in the demo:
-    The demo classifies a single synthetic trajectory in isolation.  The 7
-    salvo and rebel-group features require a multi-trajectory dataset for
-    DBSCAN clustering and cannot be computed for one trajectory alone.
-    Those 7 features are set to NaN and imputed from training medians,
-    so the demo prediction uses kinematic features only.  Production
-    inference on a full test set computes all 32 features correctly.
+Note on features and biases in the demo:
+    The demo classifies a single synthetic trajectory in isolation.
+
+    Coordinate scaling:
+      Training data uses projected geographic coordinates where 1 unit ≈ 300 m.
+      The demo generates trajectories in metres; classify() scales positions by
+      1/300 before feature extraction so kinematic features (speeds, accels)
+      land in the training distribution (initial_speed p5-p95 ≈ 0.08-0.33
+      units/s ≈ 24-99 m/s).  The 3D visualisation always shows unscaled metres.
+
+    Features set to NaN (imputed from training medians):
+      - 7 salvo/group features: require multi-trajectory DBSCAN clustering.
+      - launch_x / launch_y: the synthetic trajectory originates at (0, 0),
+        which is not a real rebel-base coordinate and is out-of-distribution
+        for the model (these are the 2nd and 5th most important features by
+        SHAP and act as near-deterministic proxies for rebel group).
+
+    Threshold biases not applied:
+      The production biases [0.0, -0.253, +1.266] correct for the 7 %
+      class-2 prevalence in the production population.  Applied to a single
+      synthetic trajectory with no prior context, the +1.266 class-2 bias
+      dominates and locks the prediction to class 2 regardless of the
+      kinematic features.  The demo uses raw argmax(proba) so slider changes
+      produce visible class transitions driven by kinematic signal.
 
 Model loading strategy (in priority order):
     1. Local artifacts in artifacts/ (ONNX → native LightGBM).
@@ -158,6 +175,7 @@ def generate_trajectory(
     noise_sigma: float,
     n: int = 100,
     dt: float = 0.05,
+    launch_angle_deg: float = 45.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate a synthetic 3D trajectory from physical parameters.
 
@@ -172,6 +190,7 @@ def generate_trajectory(
         noise_sigma: Gaussian position noise std-dev in m (radar measurement error).
         n: Number of position samples. Defaults to 100.
         dt: Time step in seconds between samples. Defaults to 0.05 s (20 Hz).
+        launch_angle_deg: Elevation angle above horizontal in degrees. Defaults to 45°.
 
     Returns:
         A tuple of:
@@ -180,7 +199,7 @@ def generate_trajectory(
     """
     rng = np.random.default_rng(seed=7)
     g = 9.81
-    theta, phi = np.radians(55), np.radians(25)
+    theta, phi = np.radians(launch_angle_deg), np.radians(25)
     v0z = initial_speed * np.sin(theta)
     v0h = initial_speed * np.cos(theta)
     v0x, v0y = v0h * np.cos(phi), v0h * np.sin(phi)
@@ -217,8 +236,9 @@ def classify(
     """Extract production features from a trajectory and classify it.
 
     Delegates to ``_extract_trajectory_features`` so the exact same physics
-    code path is used as during training. NaN imputation and bias-adjusted
-    prediction are handled internally by ``RocketClassifier``.
+    code path is used as during training.  NaN imputation is handled by
+    ``RocketClassifier._select_and_impute``; threshold biases are intentionally
+    not applied (see module docstring).
 
     Args:
         clf: Loaded ``RocketClassifier`` instance.
@@ -230,18 +250,35 @@ def classify(
             - class_idx: Predicted integer class label (0, 1, or 2).
             - proba: Float array of shape (3,) with per-class probabilities.
     """
+    # Scale from metres to training coordinate units (1 unit ≈ 300 m).
+    # Training data uses projected geographic coordinates; kinematic features
+    # computed directly from metre-scale positions would be ~300x out of the
+    # training distribution, causing trees to boundary-clamp and ignore sliders.
+    _COORD_SCALE = 1.0 / 300.0
+    pos_scaled = pos * _COORD_SCALE
     times = pd.to_datetime(t, unit="s", origin="2024-01-01")
-    df = pd.DataFrame({"x": pos[:, 0], "y": pos[:, 1], "z": pos[:, 2], "time_stamp": times})
+    df = pd.DataFrame(
+        {"x": pos_scaled[:, 0], "y": pos_scaled[:, 1], "z": pos_scaled[:, 2], "time_stamp": times}
+    )
     feats = _extract_trajectory_features(df)
 
-    # Build the 32-feature vector in SELECTED_FEATURES order; missing → NaN
-    # (salvo/group features unavailable for a single trajectory — imputed from
-    # training medians by RocketClassifier._select_and_impute).
+    # launch_x/launch_y come out as 0/0 (synthetic origin) — not a real
+    # rebel-base coordinate.  Remove them so they are imputed from training
+    # medians alongside the salvo/group features.
+    feats.pop("launch_x", None)
+    feats.pop("launch_y", None)
+
+    # Build the 32-feature vector; any missing key → NaN, imputed later.
     vec = np.array([feats.get(k, np.nan) for k in SELECTED_FEATURES], dtype=np.float32)
     X = vec.reshape(1, -1)
 
-    preds, proba = clf.predict_with_proba(X)
-    return int(preds[0]), proba[0]
+    # Do not apply production threshold biases.  The +1.266 class-2 bias
+    # corrects for the 7 % class-2 prevalence in the production population;
+    # on a single synthetic trajectory it dominates and locks the prediction
+    # to class 2.  Raw argmax(proba) lets kinematic features drive the result.
+    proba = clf.predict_proba(X)
+    pred = int(np.argmax(proba[0]))
+    return pred, proba[0]
 
 
 # ── Plotly 3D chart ────────────────────────────────────────────────────────────
@@ -414,10 +451,14 @@ def main() -> None:
         initial_speed = st.slider(
             "Initial Speed  (m/s)",
             min_value=5.0,
-            max_value=120.0,
+            max_value=200.0,
             value=55.0,
             step=1.0,
-            help="Launch velocity magnitude — higher values yield larger apogee and longer range.",
+            help=(
+                "Launch velocity magnitude. After coordinate scaling, values of "
+                "24-99 m/s land in the training distribution (p5-p95). Higher values "
+                "yield larger apogee and longer range."
+            ),
         )
         thrust_accel = st.slider(
             "Thrust Acceleration  (m/s²)",
@@ -433,12 +474,24 @@ def main() -> None:
         noise_sigma = st.slider(
             "Measurement Noise  (m)",
             min_value=0.0,
-            max_value=5.0,
-            value=0.1,
-            step=0.1,
+            max_value=20.0,
+            value=2.0,
+            step=0.5,
             help=(
-                "Radar position noise. High values create an erratic path "
+                "Radar position noise std-dev. After coordinate scaling, ~2 m matches "
+                "typical training-set noise levels. High values create an erratic path "
                 "characteristic of non-rocket or jamming objects."
+            ),
+        )
+        launch_angle_deg = st.slider(
+            "Launch Angle  (°)",
+            min_value=20.0,
+            max_value=70.0,
+            value=45.0,
+            step=1.0,
+            help=(
+                "Elevation angle above horizontal. Steeper angles produce higher apogee; "
+                "shallower angles produce longer horizontal range."
             ),
         )
 
@@ -449,10 +502,15 @@ def main() -> None:
             )
         else:
             st.success("✓ Model loaded")
-            st.caption(f"{len(feature_names)} selected features (25 kinematic + 7 salvo/group)")
+            st.caption(
+                f"{len(feature_names)} features · 23 kinematic active · "
+                "coords scaled 1/300 · launch pos + salvo/group imputed · biases not applied"
+            )
 
     # ── Compute ────────────────────────────────────────────────────────────────
-    pos, t = generate_trajectory(initial_speed, thrust_accel, noise_sigma)
+    pos, t = generate_trajectory(
+        initial_speed, thrust_accel, noise_sigma, launch_angle_deg=launch_angle_deg
+    )
 
     if clf is not None:
         class_idx, proba = classify(clf, pos, t)
@@ -474,8 +532,11 @@ def main() -> None:
     st.markdown(
         "Drag the sidebar sliders to modify the synthetic trajectory. "
         "The LightGBM model re-classifies on every change using the same "
-        "kinematic feature pipeline as production (salvo/group features are "
-        "unavailable for a single synthetic trajectory and are imputed from medians)."
+        "kinematic feature pipeline as production. Salvo/group features and "
+        "launch position are imputed from training medians (unavailable for a "
+        "single synthetic trajectory). Production threshold biases are not "
+        "applied — the demo uses raw class probabilities so slider changes "
+        "produce visible class transitions."
     )
 
     # ── Metric cards ───────────────────────────────────────────────────────────
