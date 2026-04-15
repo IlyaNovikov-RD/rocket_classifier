@@ -14,12 +14,12 @@ Generates ``assets/demo.png`` containing three subplots:
               Per-class 2-sigma covariance ellipses show the class-conditional
               distributions.  Both features are in ``SELECTED_FEATURES`` and
               are used by the production model.
-    - Right:  Launch-site decision map — a 15-NN classifier trained on the
-              8,016 class-exclusive (launch_x, launch_y) sites paints the
-              background to show the dominant class in each neighbourhood.
-              Unique sites are scattered on top.  Directly visualises why
-              launch_x and launch_y are SHAP ranks 2 and 5: knowing where
-              a rocket launched almost determines its class.
+    - Right:  Per-class KDE contours (two density levels: outer extent and
+              dense core) over the unique launch-site scatter.  Reveals the
+              nested cluster structure: Class 0 appears as three separate
+              blobs — its own concentrated cluster adjacent to the other two
+              groups, plus inner Class 0 pockets at the core of the Class 1
+              and Class 2 territories.  launch_x/y are SHAP ranks 2 & 5.
 
 All three panels require ``cache/cache_train_features.parquet`` and/or
 ``data/train.csv`` (run ``make download-all`` to fetch both).
@@ -329,63 +329,25 @@ def make_demo_plot(output_path: Path) -> None:
     ax_s.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.4)
 
     if launch_df is not None:
-        from sklearn.neighbors import KNeighborsClassifier
+        from sklearn.neighbors import KernelDensity
 
         n_total = len(launch_df)
         class_counts = launch_df["label"].value_counts().sort_index().to_dict()
 
-        # ── Decision background: 15-NN on unique sites → class ───────────────
-        # Shows the dominant class in each neighbourhood, faded out in the
-        # empty periphery so only regions near actual training sites are lit.
         unique_sites = launch_df[["launch_x", "launch_y", "label"]].drop_duplicates(
             subset=["launch_x", "launch_y"]
         )
-        site_xy = unique_sites[["launch_x", "launch_y"]].values
-        site_labels = unique_sites["label"].values
+        n_unique = len(unique_sites)
 
-        knn = KNeighborsClassifier(n_neighbors=15, algorithm="kd_tree")
-        knn.fit(site_xy, site_labels)
-
-        margin = 0.05
+        margin = 0.10
         x0, x1 = launch_df["launch_x"].min() - margin, launch_df["launch_x"].max() + margin
         y0, y1 = launch_df["launch_y"].min() - margin, launch_df["launch_y"].max() + margin
-        xx, yy = np.meshgrid(np.linspace(x0, x1, 350), np.linspace(y0, y1, 350))
+        xx, yy = np.meshgrid(np.linspace(x0, x1, 300), np.linspace(y0, y1, 300))
         grid_pts = np.c_[xx.ravel(), yy.ravel()]
-        Z = knn.predict(grid_pts).reshape(xx.shape)
 
-        # Distance-based alpha: fade to 0 beyond ~4x the median site spacing
-        # so the empty outer margin stays dark instead of red.
-        from sklearn.neighbors import NearestNeighbors
-
-        nn1 = NearestNeighbors(n_neighbors=2, algorithm="kd_tree").fit(site_xy)
-        median_spacing = float(np.median(nn1.kneighbors(site_xy)[0][:, 1]))
-        fade_scale = median_spacing * 4
-        dists_grid = nn1.kneighbors(grid_pts, n_neighbors=1)[0].reshape(xx.shape)
-        alpha_grid = (0.30 * np.exp(-((dists_grid / fade_scale) ** 2))).clip(0, 0.30)
-
-        class_rgb = {
-            0: tuple(int(GREEN.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4)),
-            1: tuple(int(GOLD.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4)),
-            2: tuple(int(RED.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4)),
-        }
-        h, w = xx.shape
-        rgba = np.zeros((h, w, 4), dtype=np.float32)
-        for cls, rgb in class_rgb.items():
-            rgba[Z == cls, :3] = rgb
-        rgba[:, :, 3] = alpha_grid
-
-        ax_s.imshow(
-            rgba,
-            extent=[x0, x1, y0, y1],
-            origin="lower",
-            aspect="auto",
-            interpolation="bilinear",
-            zorder=1,
-        )
-
-        # ── Scatter: unique sites per class on top ────────────────────────────
-        sizes = {0: 4, 1: 7, 2: 12}
-        alphas = {0: 0.30, 1: 0.50, 2: 0.80}
+        # ── Scatter: unique sites per class ──────────────────────────────────
+        sizes = {0: 3, 1: 6, 2: 10}
+        alphas = {0: 0.25, 1: 0.45, 2: 0.75}
         for cls in (0, 1, 2):
             sub = (
                 launch_df[launch_df["label"] == cls][["launch_x", "launch_y"]]
@@ -404,11 +366,39 @@ def make_demo_plot(output_path: Path) -> None:
                 label=f"Class {cls}  ({n_traj:,} trajs, {len(sub):,} sites)",
             )
 
-        n_unique = len(unique_sites)
+        # ── KDE contours per class — two levels: outer extent + dense core ───
+        # Reveals the nested structure: Class 0 appears as three separate
+        # blobs — its own cluster plus independent Class 0 groups operating
+        # in proximity to the Class 1 and Class 2 clusters.
+        bw = 0.07  # bandwidth in training coordinate units (~21 m)
+        contour_levels = [0.12, 0.45]  # fraction of per-class peak density
+        lw_outer, lw_inner = 1.0, 2.0
+        for cls in (0, 1, 2):
+            pts = (
+                launch_df[launch_df["label"] == cls][["launch_x", "launch_y"]]
+                .drop_duplicates()
+                .values
+            )
+            kde = KernelDensity(bandwidth=bw, kernel="gaussian")
+            kde.fit(pts)
+            log_dens = kde.score_samples(grid_pts)
+            Z_kde = np.exp(log_dens).reshape(xx.shape)
+            Z_norm = Z_kde / Z_kde.max()
+            ax_s.contour(
+                xx,
+                yy,
+                Z_norm,
+                levels=contour_levels,
+                colors=[CLASS_COLOR[cls]],
+                linewidths=[lw_outer, lw_inner],
+                alpha=0.80,
+                zorder=3,
+            )
+
         ax_s.text(
             0.02,
             0.98,
-            f"Background: 15-NN decision regions from {n_unique:,} class-exclusive sites\n"
+            f"KDE contours per class (bw={bw}) · {n_unique:,} class-exclusive sites\n"
             "launch_x / launch_y  —  SHAP ranks 2 & 5",
             transform=ax_s.transAxes,
             color=TEXT_COLOR,
