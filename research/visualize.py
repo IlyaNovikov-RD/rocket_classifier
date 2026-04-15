@@ -14,12 +14,12 @@ Generates ``assets/demo.png`` containing three subplots:
               Per-class 2-sigma covariance ellipses show the class-conditional
               distributions.  Both features are in ``SELECTED_FEATURES`` and
               are used by the production model.
-    - Right:  Real launch-site scatter from the training cache — every unique
-              (launch_x, launch_y) coordinate, coloured by class.  Production
-              DBSCAN on StandardScaler-normalised coordinates (eps=0.25,
-              min_samples=3) finds 3 rebel groups, whose aggregate features
-              have near-zero SHAP importance — raw launch coordinates already
-              capture the same signal (SHAP ranks 2 and 5).
+    - Right:  Launch-site decision map — a 1-NN classifier trained on the
+              8,016 class-exclusive (launch_x, launch_y) sites paints the
+              background to show which class "owns" each location.  Unique
+              sites are scattered on top.  Directly visualises why launch_x
+              and launch_y are SHAP ranks 2 and 5: knowing where a rocket
+              launched almost determines its class.
 
 All three panels require ``cache/cache_train_features.parquet`` and/or
 ``data/train.csv`` (run ``make download-all`` to fetch both).
@@ -329,13 +329,34 @@ def make_demo_plot(output_path: Path) -> None:
     ax_s.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.4)
 
     if launch_df is not None:
-        n_total = len(launch_df)
-        # Per-class trajectory counts and unique launch sites
-        class_counts = launch_df["label"].value_counts().sort_index().to_dict()
-        # Alpha and marker size scaled so the rare Class 2 is clearly visible
-        alphas = {0: 0.18, 1: 0.35, 2: 0.70}
-        sizes = {0: 4, 1: 7, 2: 12}
+        from matplotlib.colors import ListedColormap
+        from sklearn.neighbors import KNeighborsClassifier
 
+        n_total = len(launch_df)
+        class_counts = launch_df["label"].value_counts().sort_index().to_dict()
+
+        # ── Decision background: 1-NN on unique sites → class ────────────────
+        # Paints a colour field showing which class "owns" each location.
+        # Because sites are class-exclusive, 1-NN accuracy is ~100% — this
+        # directly visualises why launch_x/y are SHAP ranks 2 & 5.
+        unique_sites = launch_df[["launch_x", "launch_y", "label"]].drop_duplicates(
+            subset=["launch_x", "launch_y"]
+        )
+        knn = KNeighborsClassifier(n_neighbors=1, algorithm="kd_tree")
+        knn.fit(unique_sites[["launch_x", "launch_y"]].values, unique_sites["label"].values)
+
+        margin = 0.05
+        x0, x1 = launch_df["launch_x"].min() - margin, launch_df["launch_x"].max() + margin
+        y0, y1 = launch_df["launch_y"].min() - margin, launch_df["launch_y"].max() + margin
+        xx, yy = np.meshgrid(np.linspace(x0, x1, 350), np.linspace(y0, y1, 350))
+        Z = knn.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+
+        cmap_bg = ListedColormap([GREEN, GOLD, RED])
+        ax_s.pcolormesh(xx, yy, Z, cmap=cmap_bg, alpha=0.18, zorder=1, shading="auto")
+
+        # ── Scatter: unique sites per class on top ────────────────────────────
+        sizes = {0: 4, 1: 7, 2: 12}
+        alphas = {0: 0.30, 1: 0.50, 2: 0.80}
         for cls in (0, 1, 2):
             sub = (
                 launch_df[launch_df["label"] == cls][["launch_x", "launch_y"]]
@@ -354,32 +375,19 @@ def make_demo_plot(output_path: Path) -> None:
                 label=f"Class {cls}  ({n_traj:,} trajs, {len(sub):,} sites)",
             )
 
-        # 2-sigma ellipse enclosing the dominant DBSCAN group (all points)
-        all_x = launch_df["launch_x"].values
-        all_y = launch_df["launch_y"].values
-        cx, cy = all_x.mean(), all_y.mean()
-        sx, sy = all_x.std() * 2, all_y.std() * 2
-        ellipse = mpatches.Ellipse(
-            (cx, cy),
-            width=sx * 2,
-            height=sy * 2,
-            fill=False,
-            edgecolor=TEXT_COLOR,
-            linewidth=1.2,
-            linestyle="--",
-            alpha=0.35,
-            zorder=3,
-        )
-        ax_s.add_patch(ellipse)
+        n_unique = len(unique_sites)
         ax_s.text(
-            cx,
-            cy + sy + 0.01,
-            "3 DBSCAN groups (StandardScaler, eps=0.25)\ngroup_* features near-zero SHAP importance",
+            0.02,
+            0.98,
+            f"Background: 1-NN decision regions from {n_unique:,} class-exclusive sites\n"
+            "launch_x / launch_y  —  SHAP ranks 2 & 5",
+            transform=ax_s.transAxes,
             color=TEXT_COLOR,
             fontsize=7.5,
-            ha="center",
-            va="bottom",
-            alpha=0.65,
+            ha="left",
+            va="top",
+            alpha=0.80,
+            zorder=4,
         )
 
         ax_s.legend(
@@ -390,7 +398,7 @@ def make_demo_plot(output_path: Path) -> None:
             loc="lower right",
             markerscale=2.5,
         )
-        title_suffix = f"({n_total:,} trajectories · {len(launch_df[['launch_x', 'launch_y']].drop_duplicates()):,} unique sites)"
+        title_suffix = f"({n_total:,} trajectories · {n_unique:,} unique sites)"
     else:
         ax_s.text(
             0.5,
