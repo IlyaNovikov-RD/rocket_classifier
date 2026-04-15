@@ -10,10 +10,12 @@ Generates ``assets/demo.png`` containing three subplots:
               ``_compute_derivatives`` (production code path).  The magnitude
               and timing of the thrust-ignition spike differ across classes and
               are among the key kinematic discriminators.
-    - Right:  Salvo context — top-down launch-position view of three synthetic
-              rebel bases, each firing a 4-rocket salvo in sequence.
-              Illustrates domain assumption 3b (rockets fired in salvos) and
-              the ``salvo_time_rank`` feature (rank 12 in production model).
+    - Right:  Real launch-site scatter from the training cache — every unique
+              (launch_x, launch_y) coordinate, coloured by class.  Production
+              DBSCAN (eps=0.25, min_samples=3) finds 1 dominant group containing
+              99.7 % of trajectories, explaining why the rebel-group features
+              have near-zero importance in the trained model.  Requires
+              ``cache/cache_train_features.parquet`` (run ``make download-all``).
 
 Uses ``_compute_derivatives`` from ``rocket_classifier/features.py`` so that
 the kinematic panel reflects the same physics code path used in production.
@@ -30,6 +32,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from rocket_classifier.features import _compute_derivatives
 
@@ -50,8 +53,6 @@ TEXT_COLOR = "#e6edf3"
 GREEN = "#3fb950"  # Class 0
 GOLD = "#f0c040"  # Class 1
 RED = "#f85149"  # Class 2
-BLUE = "#58a6ff"  # salvo base accent
-ORANGE = "#ffa657"  # salvo base accent
 
 CLASS_COLOR = {0: GREEN, 1: GOLD, 2: RED}
 CLASS_LABEL = {0: "Class 0  (69 %)", 1: "Class 1  (24 %)", 2: "Class 2  (7 %)"}
@@ -133,7 +134,7 @@ def generate_class1(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarra
 def generate_class2(n: int = _N, dt: float = _DT) -> tuple[np.ndarray, np.ndarray]:
     """Class 2 (7 %): Lower speed, steep short-range arc, minimal motor burn.
 
-    speed=35 chosen so t_land ≈ 6.9s > n*dt=6s, avoiding a ground-clamp
+    speed=35 chosen so t_land ~= 6.9s > n*dt=6s, avoiding a ground-clamp
     discontinuity that would create an artifact jerk spike inside the window.
     """
     return _ballistic(
@@ -150,35 +151,27 @@ def compute_jerk_magnitude(pos: np.ndarray, dt_arr: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Salvo context data (synthetic)
+# Real launch-site data from training cache
 # ---------------------------------------------------------------------------
 
+_CACHE_PATH = Path(__file__).parent.parent / "cache" / "cache_train_features.parquet"
 
-def generate_salvo_data() -> tuple[list, list]:
-    """Generate three synthetic rebel bases, each firing a 4-rocket salvo.
+
+def load_real_launch_data() -> pd.DataFrame | None:
+    """Load launch positions and class labels from the training feature cache.
 
     Returns:
-        (bases, salvos) where each base is a dict with 'center', 'color', and
-        'label', and each salvo is a list of (launch_x, launch_y, rank) tuples.
+        DataFrame with columns [launch_x, launch_y, label], or None if the
+        cache parquet is not present (run ``make download-all`` to fetch it).
     """
-    bases = [
-        {"center": np.array([1.5, 3.5]), "color": BLUE, "label": "Base A"},
-        {"center": np.array([7.0, 1.5]), "color": ORANGE, "label": "Base B"},
-        {"center": np.array([4.5, 7.0]), "color": GREEN, "label": "Base C"},
-    ]
-
-    salvos = []
-    for base in bases:
-        cx, cy = base["center"]
-        angles = RNG.uniform(0, 2 * np.pi, 4)
-        radii = RNG.uniform(0.05, 0.25, 4)
-        points = [
-            (cx + r * np.cos(a), cy + r * np.sin(a)) for r, a in zip(radii, angles, strict=True)
-        ]
-        salvo = [(x, y, rank + 1) for rank, (x, y) in enumerate(points)]
-        salvos.append(salvo)
-
-    return bases, salvos
+    if not _CACHE_PATH.exists():
+        logger.warning(
+            "Training cache not found at %s — right panel will be blank. "
+            "Run 'make download-all' to fetch it.",
+            _CACHE_PATH,
+        )
+        return None
+    return pd.read_parquet(_CACHE_PATH, columns=["launch_x", "launch_y", "label"])
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +200,7 @@ def make_demo_plot(output_path: Path) -> None:
     positions = {0: pos0, 1: pos1, 2: pos2}
     jerks = {0: jerk0, 1: jerk1, 2: jerk2}
 
-    bases, salvos = generate_salvo_data()
+    launch_df = load_real_launch_data()
 
     # ── Figure layout ─────────────────────────────────────────────────────────
     fig = plt.figure(figsize=(21, 7), facecolor=DARK_BG)
@@ -301,8 +294,8 @@ def make_demo_plot(output_path: Path) -> None:
         )
 
     # Annotate the Class 1 ignition spike (largest, most visible).
-    # Thrust ramps linearly from max → 0, so the abrupt acceleration step is
-    # at ignition (t≈0), not at thrust-end where acceleration is already ~0.
+    # Thrust ramps linearly from max -> 0, so the abrupt acceleration step is
+    # at ignition (t~=0), not at thrust-end where acceleration is already ~0.
     peak_idx = int(np.argmax(jerk1))
     ax2d.annotate(
         "Motor ignition\nspike (Class 1)",
@@ -329,74 +322,99 @@ def make_demo_plot(output_path: Path) -> None:
     ax2d.tick_params(axis="both", colors=TEXT_COLOR)
     ax2d.legend(fontsize=9, facecolor=PANEL_BG, edgecolor=GRID_COLOR, labelcolor=TEXT_COLOR)
 
-    # ── Right: Salvo context ───────────────────────────────────────────────────
+    # ── Right: Real launch-site scatter ───────────────────────────────────────
     ax_s.set_facecolor(PANEL_BG)
     ax_s.tick_params(colors=TEXT_COLOR, labelsize=9)
     for spine in ax_s.spines.values():
         spine.set_edgecolor(GRID_COLOR)
     ax_s.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.4)
 
-    rank_colors = [BLUE, GREEN, GOLD, RED]
+    if launch_df is not None:
+        n_total = len(launch_df)
+        # Per-class trajectory counts and unique launch sites
+        class_counts = launch_df["label"].value_counts().sort_index().to_dict()
+        # Alpha and marker size scaled so the rare Class 2 is clearly visible
+        alphas = {0: 0.18, 1: 0.35, 2: 0.70}
+        sizes = {0: 4, 1: 7, 2: 12}
 
-    for base, salvo in zip(bases, salvos, strict=True):
-        cx, cy = base["center"]
-        color = base["color"]
-
-        circle = mpatches.Circle(
-            (cx, cy),
-            radius=0.45,
-            fill=False,
-            edgecolor=color,
-            linewidth=1.5,
-            linestyle="--",
-            alpha=0.5,
-        )
-        ax_s.add_patch(circle)
-        ax_s.text(
-            cx, cy + 0.55, base["label"], color=color, fontsize=8.5, fontweight="bold", ha="center"
-        )
-
-        xs = [p[0] for p in salvo]
-        ys = [p[1] for p in salvo]
-
-        for i in range(len(salvo) - 1):
-            ax_s.annotate(
-                "",
-                xy=(xs[i + 1], ys[i + 1]),
-                xytext=(xs[i], ys[i]),
-                arrowprops={"arrowstyle": "->", "color": TEXT_COLOR, "lw": 0.9, "alpha": 0.55},
+        for cls in (0, 1, 2):
+            sub = (
+                launch_df[launch_df["label"] == cls][["launch_x", "launch_y"]]
+                .drop_duplicates()
+                .values
+            )
+            n_traj = class_counts.get(cls, 0)
+            ax_s.scatter(
+                sub[:, 0],
+                sub[:, 1],
+                c=CLASS_COLOR[cls],
+                s=sizes[cls],
+                alpha=alphas[cls],
+                linewidths=0,
+                zorder=2,
+                label=f"Class {cls}  ({n_traj:,} trajs, {len(sub):,} sites)",
             )
 
-        for rx, ry, rank in salvo:
-            rc = rank_colors[rank - 1]
-            ax_s.scatter(rx, ry, s=120, color=rc, zorder=5, edgecolors=TEXT_COLOR, linewidths=0.6)
-            ax_s.text(rx + 0.06, ry + 0.07, f"#{rank}", color=rc, fontsize=8, fontweight="bold")
+        # 2-sigma ellipse enclosing the dominant DBSCAN group (all points)
+        all_x = launch_df["launch_x"].values
+        all_y = launch_df["launch_y"].values
+        cx, cy = all_x.mean(), all_y.mean()
+        sx, sy = all_x.std() * 2, all_y.std() * 2
+        ellipse = mpatches.Ellipse(
+            (cx, cy),
+            width=sx * 2,
+            height=sy * 2,
+            fill=False,
+            edgecolor=TEXT_COLOR,
+            linewidth=1.2,
+            linestyle="--",
+            alpha=0.35,
+            zorder=3,
+        )
+        ax_s.add_patch(ellipse)
+        ax_s.text(
+            cx,
+            cy + sy + 0.01,
+            f"1 DBSCAN group  ({n_total:,} traj, 99.7 %)\ngroup_* features near-zero importance",
+            color=TEXT_COLOR,
+            fontsize=7.5,
+            ha="center",
+            va="bottom",
+            alpha=0.65,
+        )
 
-    rank_handles = [
-        mpatches.Patch(color=rank_colors[i], label=f"Salvo rank {i + 1}") for i in range(4)
-    ]
-    ax_s.legend(
-        handles=rank_handles,
-        fontsize=8,
-        loc="lower right",
-        facecolor=PANEL_BG,
-        edgecolor=GRID_COLOR,
-        labelcolor=TEXT_COLOR,
-    )
+        ax_s.legend(
+            fontsize=7.5,
+            facecolor=PANEL_BG,
+            edgecolor=GRID_COLOR,
+            labelcolor=TEXT_COLOR,
+            loc="lower right",
+            markerscale=2.5,
+        )
+        title_suffix = f"({n_total:,} trajectories · {len(launch_df[['launch_x', 'launch_y']].drop_duplicates()):,} unique sites)"
+    else:
+        ax_s.text(
+            0.5,
+            0.5,
+            "Cache not found.\nRun 'make download-all'\nto see real launch sites.",
+            transform=ax_s.transAxes,
+            ha="center",
+            va="center",
+            color=TEXT_COLOR,
+            fontsize=11,
+        )
+        title_suffix = "(cache not found)"
 
-    ax_s.set_xlabel("Launch X (normalised)", color=TEXT_COLOR, fontsize=11, labelpad=6)
-    ax_s.set_ylabel("Launch Y (normalised)", color=TEXT_COLOR, fontsize=11, labelpad=6)
+    ax_s.set_xlabel("Launch X (training coords)", color=TEXT_COLOR, fontsize=11, labelpad=6)
+    ax_s.set_ylabel("Launch Y (training coords)", color=TEXT_COLOR, fontsize=11, labelpad=6)
     ax_s.set_title(
-        "Salvo Context: Launch Sequence\n(assumption 3b — salvo_time_rank, rank 12 in model)",
+        f"Launch Sites — Real Training Data\n{title_suffix}",
         color=TEXT_COLOR,
         fontsize=11,
         fontweight="bold",
         pad=12,
     )
     ax_s.tick_params(axis="both", colors=TEXT_COLOR)
-    ax_s.set_xlim(0, 10)
-    ax_s.set_ylim(-0.5, 9)
-    ax_s.set_aspect("equal")
 
     # ── Suptitle ──────────────────────────────────────────────────────────────
     fig.suptitle(
