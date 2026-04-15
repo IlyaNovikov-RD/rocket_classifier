@@ -329,6 +329,9 @@ def make_demo_plot(output_path: Path) -> None:
     ax_s.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.4)
 
     if launch_df is not None:
+        from sklearn.cluster import DBSCAN
+        from sklearn.preprocessing import StandardScaler
+
         n_total = len(launch_df)
         # Per-class trajectory counts and unique launch sites
         class_counts = launch_df["label"].value_counts().sort_index().to_dict()
@@ -354,32 +357,63 @@ def make_demo_plot(output_path: Path) -> None:
                 label=f"Class {cls}  ({n_traj:,} trajs, {len(sub):,} sites)",
             )
 
-        # 2-sigma ellipse enclosing the dominant DBSCAN group (all points)
-        all_x = launch_df["launch_x"].values
-        all_y = launch_df["launch_y"].values
-        cx, cy = all_x.mean(), all_y.mean()
-        sx, sy = all_x.std() * 2, all_y.std() * 2
-        ellipse = mpatches.Ellipse(
-            (cx, cy),
-            width=sx * 2,
-            height=sy * 2,
-            fill=False,
-            edgecolor=TEXT_COLOR,
-            linewidth=1.2,
-            linestyle="--",
-            alpha=0.35,
-            zorder=3,
-        )
-        ax_s.add_patch(ellipse)
+        # Run DBSCAN on StandardScaler-normalised unique sites — exactly as
+        # production features.py does — and draw one 2-sigma ellipse per group.
+        unique_sites = launch_df[["launch_x", "launch_y"]].drop_duplicates().values
+        scaled = StandardScaler().fit_transform(unique_sites)
+        db_labels = DBSCAN(eps=0.25, min_samples=3).fit_predict(scaled)
+        group_ids = sorted(g for g in np.unique(db_labels) if g != -1)
+        ellipse_colors = ["#ffffff", "#aaaaff", "#ffaaaa", "#aaffaa", "#ffdd88"]
+        for i, gid in enumerate(group_ids):
+            mask = db_labels == gid
+            pts = unique_sites[mask]
+            if len(pts) < 3:
+                continue
+            mu = pts.mean(axis=0)
+            cov = np.cov(pts[:, 0], pts[:, 1])
+            eig_vals, eig_vecs = np.linalg.eigh(cov)
+            angle = np.degrees(np.arctan2(eig_vecs[1, -1], eig_vecs[0, -1]))
+            w, h = 2 * 2 * np.sqrt(np.abs(eig_vals))
+            ec = ellipse_colors[i % len(ellipse_colors)]
+            ellipse = mpatches.Ellipse(
+                mu,
+                width=w,
+                height=h,
+                angle=angle,
+                fill=False,
+                edgecolor=ec,
+                linewidth=1.5,
+                linestyle="--",
+                alpha=0.6,
+                zorder=3,
+            )
+            ax_s.add_patch(ellipse)
+            ax_s.text(
+                mu[0],
+                mu[1],
+                f"G{i + 1}\n({mask.sum():,} sites)",
+                color=ec,
+                fontsize=7,
+                ha="center",
+                va="center",
+                alpha=0.85,
+                zorder=4,
+            )
+
+        n_groups = len(group_ids)
+        n_noise = int((db_labels == -1).sum())
         ax_s.text(
-            cx,
-            cy + sy + 0.01,
-            "3 DBSCAN groups (StandardScaler, eps=0.25)\ngroup_* features near-zero SHAP importance",
+            0.02,
+            0.98,
+            f"DBSCAN (StandardScaler, eps=0.25): {n_groups} groups  ({n_noise} noise sites)\n"
+            "group_* features near-zero SHAP importance",
+            transform=ax_s.transAxes,
             color=TEXT_COLOR,
             fontsize=7.5,
-            ha="center",
-            va="bottom",
-            alpha=0.65,
+            ha="left",
+            va="top",
+            alpha=0.75,
+            zorder=4,
         )
 
         ax_s.legend(
