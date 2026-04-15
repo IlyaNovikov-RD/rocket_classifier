@@ -47,11 +47,11 @@ DARK_BG = "#0d1117"
 PANEL_BG = "#161b22"
 GRID_COLOR = "#30363d"
 TEXT_COLOR = "#e6edf3"
-GREEN = "#3fb950"    # Class 0
-GOLD = "#f0c040"     # Class 1
-RED = "#f85149"      # Class 2
-BLUE = "#58a6ff"     # salvo base accent
-ORANGE = "#ffa657"   # salvo base accent
+GREEN = "#3fb950"  # Class 0
+GOLD = "#f0c040"  # Class 1
+RED = "#f85149"  # Class 2
+BLUE = "#58a6ff"  # salvo base accent
+ORANGE = "#ffa657"  # salvo base accent
 
 CLASS_COLOR = {0: GREEN, 1: GOLD, 2: RED}
 CLASS_LABEL = {0: "Class 0  (69 %)", 1: "Class 1  (24 %)", 2: "Class 2  (7 %)"}
