@@ -16,9 +16,10 @@ Generates ``assets/demo.png`` containing three subplots:
               are used by the production model.
     - Right:  Real launch-site scatter from the training cache — every unique
               (launch_x, launch_y) coordinate, coloured by class.  Production
-              DBSCAN (eps=0.25, min_samples=3) finds 1 dominant group containing
-              99.7 % of trajectories, explaining why the rebel-group features
-              have near-zero importance in the trained model.
+              DBSCAN on StandardScaler-normalised coordinates (eps=0.25,
+              min_samples=3) finds 3 rebel groups, whose aggregate features
+              have near-zero SHAP importance — raw launch coordinates already
+              capture the same signal (SHAP ranks 2 and 5).
 
 All three panels require ``cache/cache_train_features.parquet`` and/or
 ``data/train.csv`` (run ``make download-all`` to fetch both).
@@ -373,7 +374,7 @@ def make_demo_plot(output_path: Path) -> None:
         ax_s.text(
             cx,
             cy + sy + 0.01,
-            f"1 DBSCAN group  ({n_total:,} traj, 99.7 %)\ngroup_* features near-zero importance",
+            "3 DBSCAN groups (StandardScaler, eps=0.25)\ngroup_* features near-zero SHAP importance",
             color=TEXT_COLOR,
             fontsize=7.5,
             ha="center",

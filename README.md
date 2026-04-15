@@ -74,7 +74,7 @@ There are few rebel groups, each operating from a fixed geographic area. Critica
 | `group_n_salvos` | Number of distinct firing events from this base |
 | `group_max_salvo_size` | Largest single salvo (proxy for launcher type — assumption 3a) |
 
-**Empirical finding:** DBSCAN finds **1 dominant group** containing 99.7% of all 32,741 trajectories (32,652 of 32,741). All three rocket classes launch from the same geographic region — the assumption of spatially isolated rebel bases does not hold in this dataset. As a result, the group-level features have **near-zero SHAP importance** in the trained model (they are retained for completeness but contribute negligibly to predictions). Individual exact-coordinate launch sites *are* class-exclusive (8,016 unique sites across 32,741 trajectories, zero cross-class overlap), confirming independent procurement at the site level — but spatial proximity does not separate classes.
+**Empirical finding:** DBSCAN (on StandardScaler-normalised `(launch_x, launch_y)`, eps=0.25) finds **3 rebel groups** across all 32,741 trajectories. Individual exact-coordinate launch sites are class-exclusive (8,016 unique sites across 32,741 trajectories, zero cross-class overlap), confirming independent procurement at the site level. The group-level aggregate features carry **near-zero SHAP importance** in the trained model — the raw launch coordinates (`launch_x`, `launch_y`) already capture this signal directly and rank 2nd and 5th by SHAP.
 
 ---
 
