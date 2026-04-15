@@ -18,12 +18,16 @@ Note on features and biases in the demo:
       land in the training distribution (initial_speed p5-p95 ≈ 0.08-0.33
       units/s ≈ 24-99 m/s).  The 3D visualisation always shows unscaled metres.
 
-    Features set to NaN (imputed from training medians):
+    Rebel group context:
+      launch_x and launch_y (SHAP ranks 2 and 5, near-deterministic class proxies)
+      are set to the class-specific training medians chosen by the "Rebel Group"
+      selector.  Individual launch sites are class-exclusive (zero cross-class
+      overlap across 32,741 trajectories), so geographic position is the dominant
+      classifier signal.  Using the global training median would silently inject a
+      Class 0 prior (it equals the Class 0 median because Class 0 is 69 % of data).
+
+    Features set to NaN (imputed from global training medians):
       - 7 salvo/group features: require multi-trajectory DBSCAN clustering.
-      - launch_x / launch_y: the synthetic trajectory originates at (0, 0),
-        which is not a real rebel-base coordinate and is out-of-distribution
-        for the model (these are the 2nd and 5th most important features by
-        SHAP and act as near-deterministic proxies for rebel group).
 
     Threshold biases not applied:
       The production biases [0.0, -0.253, +1.266] correct for the 7 %
@@ -78,6 +82,21 @@ GRID_COLOR = "#30363d"
 TEXT_COLOR = "#e6edf3"
 GOLD = "#f0c040"
 BLUE = "#58a6ff"
+
+# Per-class training-data medians for contextual feature imputation.
+# Individual launch sites are class-exclusive (zero cross-class overlap across
+# 32,741 trajectories); geographic position is the top-2 SHAP feature and
+# acts as a near-deterministic class proxy.  The demo sets launch_x/launch_y
+# to the class-specific median so that kinematic features can drive the result.
+_CLASS_LAUNCH_X = {0: 0.5410, 1: 0.8499, 2: 0.6965}
+_CLASS_LAUNCH_Y = {0: 0.0996, 1: 0.1551, 2: 0.2768}
+# Training-data median initial_z (launch-site terrain altitude) per class, metres.
+# initial_z is the single most important SHAP feature (rank 1, mean|SHAP| 2.01).
+_CLASS_INIT_ALT_M = {0: 12.0, 1: 24.0, 2: 39.0}
+# Training-data typical speed range for the sidebar hint, m/s.
+_CLASS_SPEED_HINT = {0: "30-50", 1: "45-70", 2: "60-100"}
+# Training-data typical launch angle range for the sidebar hint, degrees.
+_CLASS_ANGLE_HINT = {0: "50-75", 1: "55-80", 2: "10-35"}
 
 
 # ── Model + feature loading ────────────────────────────────────────────────────
@@ -176,13 +195,16 @@ def generate_trajectory(
     n: int = 100,
     dt: float = 0.05,
     launch_angle_deg: float = 45.0,
+    initial_alt_m: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate a synthetic 3D trajectory from physical parameters.
 
     Models a frictionless ballistic flight with an optional motor-burn phase.
-    Increasing ``thrust_accel`` produces a sharp jerk spike at ignition —
-    the key discriminating feature for propelled rockets.  Increasing
-    ``noise_sigma`` creates an erratic path representative of non-rocket objects.
+    The trajectory starts at ``initial_alt_m`` metres above ground, matching
+    the terrain elevation of a real launch site (training-data median: Class 0
+    ~12 m, Class 1 ~24 m, Class 2 ~39 m).  ``initial_z`` is the single most
+    important SHAP feature (rank 1, mean|SHAP| 2.01), so setting it correctly
+    is critical for accurate classification.
 
     Args:
         initial_speed: Launch speed magnitude in m/s.
@@ -191,6 +213,8 @@ def generate_trajectory(
         n: Number of position samples. Defaults to 100.
         dt: Time step in seconds between samples. Defaults to 0.05 s (20 Hz).
         launch_angle_deg: Elevation angle above horizontal in degrees. Defaults to 45°.
+        initial_alt_m: Terrain altitude of the launch site in metres. Shifts the
+            entire trajectory vertically so ``initial_z`` matches training data.
 
     Returns:
         A tuple of:
@@ -207,7 +231,7 @@ def generate_trajectory(
     t = np.linspace(0, n * dt, n)
     x = v0x * t
     y = v0y * t
-    z = v0z * t - 0.5 * g * t**2
+    z = initial_alt_m + v0z * t - 0.5 * g * t**2
 
     # Thrust phase: additional upward acceleration over the first 15% of flight.
     thrust_end = max(0.15 * t[-1], 1e-9)
@@ -232,6 +256,7 @@ def classify(
     clf: RocketClassifier,
     pos: np.ndarray,
     t: np.ndarray,
+    rebel_class: int = 0,
 ) -> tuple[int, np.ndarray]:
     """Extract production features from a trajectory and classify it.
 
@@ -244,6 +269,11 @@ def classify(
         clf: Loaded ``RocketClassifier`` instance.
         pos: Position array of shape (n, 3).
         t: Time array of shape (n,) in seconds.
+        rebel_class: Rebel group context (0, 1, or 2).  Sets ``launch_x`` and
+            ``launch_y`` to the class-specific training-data medians.  Launch
+            position is the top-2 SHAP feature and near-deterministic for class;
+            imputing from the global median (dominated by Class 0, 69 % of data)
+            would inject a Class 0 geographic prior regardless of kinematics.
 
     Returns:
         A tuple of:
@@ -262,13 +292,16 @@ def classify(
     )
     feats = _extract_trajectory_features(df)
 
-    # launch_x/launch_y come out as 0/0 (synthetic origin) — not a real
-    # rebel-base coordinate.  Remove them so they are imputed from training
-    # medians alongside the salvo/group features.
-    feats.pop("launch_x", None)
-    feats.pop("launch_y", None)
+    # Override launch_x/launch_y with the class-specific training medians.
+    # The synthetic trajectory originates at (0, 0) which is not a real
+    # rebel-base coordinate.  Individual launch sites are class-exclusive
+    # (zero cross-class overlap), so geographic position is a near-deterministic
+    # class proxy.  Using the global median would silently inject a Class 0
+    # prior (global median ≈ Class 0 median because Class 0 is 69 % of data).
+    feats["launch_x"] = _CLASS_LAUNCH_X[rebel_class]
+    feats["launch_y"] = _CLASS_LAUNCH_Y[rebel_class]
 
-    # Build the 32-feature vector; any missing key → NaN, imputed later.
+    # Build the 32-feature vector; salvo/group keys missing → NaN, imputed later.
     vec = np.array([feats.get(k, np.nan) for k in SELECTED_FEATURES], dtype=np.float32)
     X = vec.reshape(1, -1)
 
@@ -442,12 +475,43 @@ def main() -> None:
     with st.sidebar:
         st.markdown("## 🚀 Rocket Classifier")
         st.markdown(
-            "Adjust the physical parameters below to update the synthetic "
-            "trajectory and watch the model classify it in real time."
+            "Adjust the parameters below to update the synthetic trajectory "
+            "and watch the model classify it in real time."
+        )
+        st.markdown("---")
+        st.markdown("### Rebel Group Context")
+        rebel_class = st.selectbox(
+            "Rebel Group",
+            options=[0, 1, 2],
+            format_func=lambda c: (
+                f"Class {c}  —  {['69 %', '24 %', '7 %'][c]}  "
+                f"(launch alt ~{_CLASS_INIT_ALT_M[c]:.0f} m, "
+                f"speed {_CLASS_SPEED_HINT[c]} m/s, "
+                f"angle {_CLASS_ANGLE_HINT[c]}°)"
+            ),
+            index=0,
+            help=(
+                "Sets the geographic launch-site context. Launch position is the "
+                "top-2 SHAP feature and near-deterministic for class — each launch "
+                "site fires only one rocket type. The global training median would "
+                "silently inject a Class 0 prior (69 % of data)."
+            ),
         )
         st.markdown("---")
         st.markdown("### Trajectory Parameters")
 
+        initial_alt_m = st.slider(
+            "Launch Altitude  (m)",
+            min_value=0.0,
+            max_value=80.0,
+            value=float(_CLASS_INIT_ALT_M[rebel_class]),
+            step=1.0,
+            help=(
+                "Terrain elevation of the launch site. "
+                "initial_z is the single most important SHAP feature (rank 1, mean|SHAP| 2.01). "
+                "Training medians: Class 0 ~12 m · Class 1 ~24 m · Class 2 ~39 m."
+            ),
+        )
         initial_speed = st.slider(
             "Initial Speed  (m/s)",
             min_value=5.0,
@@ -455,9 +519,8 @@ def main() -> None:
             value=55.0,
             step=1.0,
             help=(
-                "Launch velocity magnitude. After coordinate scaling, values of "
-                "24-99 m/s land in the training distribution (p5-p95). Higher values "
-                "yield larger apogee and longer range."
+                f"Launch velocity magnitude. Class {rebel_class} typical range: "
+                f"{_CLASS_SPEED_HINT[rebel_class]} m/s."
             ),
         )
         thrust_accel = st.slider(
@@ -466,10 +529,7 @@ def main() -> None:
             max_value=200.0,
             value=80.0,
             step=5.0,
-            help=(
-                "Motor-burn peak acceleration. Higher values produce a sharp jerk spike "
-                "at ignition — the key discriminating feature for propelled rockets."
-            ),
+            help="Motor-burn peak acceleration over the first 15 % of flight.",
         )
         noise_sigma = st.slider(
             "Measurement Noise  (m)",
@@ -477,21 +537,18 @@ def main() -> None:
             max_value=20.0,
             value=2.0,
             step=0.5,
-            help=(
-                "Radar position noise std-dev. After coordinate scaling, ~2 m matches "
-                "typical training-set noise levels. High values create an erratic path "
-                "characteristic of non-rocket or jamming objects."
-            ),
+            help="Radar position noise std-dev (~2 m matches typical training levels).",
         )
         launch_angle_deg = st.slider(
             "Launch Angle  (°)",
-            min_value=20.0,
-            max_value=70.0,
+            min_value=5.0,
+            max_value=80.0,
             value=45.0,
             step=1.0,
             help=(
-                "Elevation angle above horizontal. Steeper angles produce higher apogee; "
-                "shallower angles produce longer horizontal range."
+                f"Elevation angle above horizontal. "
+                f"Class {rebel_class} typical range: {_CLASS_ANGLE_HINT[rebel_class]}°. "
+                "Steeper = higher apogee; shallower = longer range."
             ),
         )
 
@@ -503,17 +560,26 @@ def main() -> None:
         else:
             st.success("✓ Model loaded")
             st.caption(
-                f"{len(feature_names)} features · 23 kinematic active · "
-                "coords scaled 1/300 · launch pos + salvo/group imputed · biases not applied"
+                f"{len(feature_names)} features · "
+                f"launch pos: Class {rebel_class} median · "
+                "salvo/group imputed · biases not applied"
             )
 
     # ── Compute ────────────────────────────────────────────────────────────────
+    # n=50 matches the training-data observation window (~2.5 s at 20 Hz).
+    # The full training trajectory duration is 1.3-2.5 s (n_points p5-p95: 14-88).
+    # Using n=100 (5 s) pushes apogee_relative, x_range, and final_z far OOD.
     pos, t = generate_trajectory(
-        initial_speed, thrust_accel, noise_sigma, launch_angle_deg=launch_angle_deg
+        initial_speed,
+        thrust_accel,
+        noise_sigma,
+        n=50,
+        launch_angle_deg=launch_angle_deg,
+        initial_alt_m=initial_alt_m,
     )
 
     if clf is not None:
-        class_idx, proba = classify(clf, pos, t)
+        class_idx, proba = classify(clf, pos, t, rebel_class=rebel_class)
         confidence = float(proba[class_idx])
     else:
         class_idx = 0
@@ -530,13 +596,13 @@ def main() -> None:
     # ── Page header ────────────────────────────────────────────────────────────
     st.markdown("# Rocket Trajectory Classifier — Live Demo")
     st.markdown(
-        "Drag the sidebar sliders to modify the synthetic trajectory. "
+        "Select a **Rebel Group** context and adjust the trajectory parameters. "
         "The LightGBM model re-classifies on every change using the same "
-        "kinematic feature pipeline as production. Salvo/group features and "
-        "launch position are imputed from training medians (unavailable for a "
-        "single synthetic trajectory). Production threshold biases are not "
-        "applied — the demo uses raw class probabilities so slider changes "
-        "produce visible class transitions."
+        "kinematic feature pipeline as production. "
+        "Launch position (SHAP rank 1-2) is set to the class-specific training median; "
+        "salvo/group features are imputed from training medians. "
+        "Production threshold biases are not applied — raw probabilities let "
+        "kinematic changes produce visible class transitions."
     )
 
     # ── Metric cards ───────────────────────────────────────────────────────────
