@@ -1,28 +1,29 @@
-"""Demo visualization — all three panels use 100 % real training data.
+"""Demo visualization — four panels of real training and test data.
 
-Generates ``assets/demo.png`` containing three subplots:
+Generates ``assets/demo.png`` containing four subplots (2x2):
 
-    - Left:   3D trajectory comparison — one representative real radar track per
-              class (traj #50 Class 0, #126 Class 1, #554 Class 2), loaded
-              directly from ``data/train.csv``.  Trajectories are centred at the
-              launch origin for horizontal comparison while retaining true terrain
-              altitude so the ``initial_z`` (SHAP rank 1) difference is visible.
-              Colours match the Streamlit demo.
-    - Centre: Real training-data scatter of the top two SHAP-confirmed
-              non-geographic kinematic features: ``initial_z`` (SHAP rank 1,
-              mean |SHAP| 2.01) and ``v_horiz_median`` (SHAP rank 3, 0.98).
-              Per-class 2-sigma covariance ellipses show the class-conditional
-              distributions.  Both features are in ``SELECTED_FEATURES`` and
-              are used by the production model.
-    - Right:  Per-class KDE contours (two density levels: outer extent and
-              dense core) over the unique launch-site scatter.  Reveals the
-              nested cluster structure: Class 0 appears as three separate
-              blobs — its own concentrated cluster adjacent to the other two
-              groups, plus inner Class 0 pockets at the core of the Class 1
-              and Class 2 territories.  launch_x/y are SHAP ranks 2 & 5.
+    - Top-left:     3D trajectory comparison — one representative real radar
+                    track per class (traj #50 Class 0, #126 Class 1, #554
+                    Class 2), loaded directly from ``data/train.csv``.
+                    Trajectories are centred at the launch origin for horizontal
+                    comparison while retaining true terrain altitude so the
+                    ``initial_z`` (SHAP rank 1) difference is visible.
+    - Top-right:    Real training-data scatter of the top two SHAP-confirmed
+                    non-geographic kinematic features: ``initial_z`` (SHAP
+                    rank 1, mean |SHAP| 2.01) and ``v_horiz_median`` (SHAP
+                    rank 3, 0.98).  Per-class 2-sigma covariance ellipses show
+                    the class-conditional distributions.
+    - Bottom-left:  Per-class KDE contours (two density levels: outer extent
+                    and dense core) over the unique training launch-site
+                    scatter.  Reveals the nested cluster structure.
+    - Bottom-right: Test launch sites coloured by predicted class (from
+                    ``output/submission.csv``), with dashed training KDE
+                    contours as reference.  Confirms that test trajectories
+                    fall into the same geographic clusters as training data.
 
-All three panels require ``cache/cache_train_features.parquet`` and/or
-``data/train.csv`` (run ``make download-all`` to fetch both).
+Training panels require ``cache/cache_train_features.parquet`` and/or
+``data/train.csv``.  The test panel requires ``cache/cache_test_features.parquet``
+and ``output/submission.csv`` (run ``make run`` to generate both).
 """
 
 import logging
@@ -116,6 +117,8 @@ def load_real_trajectories() -> dict[int, np.ndarray] | None:
 
 
 _CACHE_PATH = Path(__file__).parent.parent / "cache" / "cache_train_features.parquet"
+_TEST_CACHE_PATH = Path(__file__).parent.parent / "cache" / "cache_test_features.parquet"
+_SUBMISSION_PATH = Path(__file__).parent.parent / "output" / "submission.csv"
 
 
 def load_real_launch_data() -> pd.DataFrame | None:
@@ -138,34 +141,69 @@ def load_real_launch_data() -> pd.DataFrame | None:
     )
 
 
+def load_test_launch_data() -> pd.DataFrame | None:
+    """Load test trajectory launch sites and predicted labels.
+
+    Reads ``launch_x`` / ``launch_y`` from the test feature cache and joins
+    with ``output/submission.csv`` to attach predicted class labels.
+
+    Returns:
+        DataFrame with columns [launch_x, launch_y, label],
+        or None if required files are missing.
+    """
+    if not _TEST_CACHE_PATH.exists():
+        logger.warning(
+            "Test cache not found at %s — test panel will be blank. "
+            "Run 'make run' to generate it.",
+            _TEST_CACHE_PATH,
+        )
+        return None
+    if not _SUBMISSION_PATH.exists():
+        logger.warning(
+            "Submission not found at %s — test panel will be blank. "
+            "Run 'make run' to generate it.",
+            _SUBMISSION_PATH,
+        )
+        return None
+
+    test_feats = pd.read_parquet(_TEST_CACHE_PATH, columns=["launch_x", "launch_y"])
+    sub = pd.read_csv(_SUBMISSION_PATH).rename(columns={"trajectory_ind": "traj_ind"})
+    sub = sub.set_index("traj_ind")
+    merged = test_feats.join(sub, how="inner")
+    return merged[["launch_x", "launch_y", "label"]].reset_index(drop=True)
+
+
 # ---------------------------------------------------------------------------
-# Three-panel figure
+# Four-panel figure
 # ---------------------------------------------------------------------------
 
 
 def make_demo_plot(output_path: Path) -> None:
-    """Render and save the three-panel real-data visualization."""
+    """Render and save the four-panel real-data visualization."""
     traj_data = load_real_trajectories()
     launch_df = load_real_launch_data()
+    test_df = load_test_launch_data()
 
-    # ── Figure layout ─────────────────────────────────────────────────────────
-    fig = plt.figure(figsize=(21, 7), facecolor=DARK_BG)
+    # ── Figure layout (2x2) ───────────────────────────────────────────────────
+    fig = plt.figure(figsize=(20, 15), facecolor=DARK_BG)
     fig.patch.set_facecolor(DARK_BG)
 
     gs = gridspec.GridSpec(
-        1,
-        3,
+        2,
+        2,
         figure=fig,
-        left=0.04,
+        left=0.05,
         right=0.97,
-        top=0.87,
-        bottom=0.10,
-        wspace=0.30,
+        top=0.93,
+        bottom=0.05,
+        wspace=0.25,
+        hspace=0.28,
     )
 
-    ax3d = fig.add_subplot(gs[0], projection="3d")
-    ax2d = fig.add_subplot(gs[1])
-    ax_s = fig.add_subplot(gs[2])
+    ax3d = fig.add_subplot(gs[0, 0], projection="3d")
+    ax2d = fig.add_subplot(gs[0, 1])
+    ax_s = fig.add_subplot(gs[1, 0])
+    ax_t = fig.add_subplot(gs[1, 1])
 
     # ── Left: 3D real radar tracks ─────────────────────────────────────────────
     ax3d.set_facecolor(PANEL_BG)
@@ -373,6 +411,7 @@ def make_demo_plot(output_path: Path) -> None:
         bw = 0.025  # bandwidth in training coordinate units (~7 m)
         contour_levels = [0.12, 0.45]  # fraction of per-class peak density
         lw_outer, lw_inner = 1.0, 2.0
+        kde_contours: dict[int, np.ndarray] = {}  # store for test panel reuse
         for cls in (0, 1, 2):
             pts = (
                 launch_df[launch_df["label"] == cls][["launch_x", "launch_y"]]
@@ -384,6 +423,7 @@ def make_demo_plot(output_path: Path) -> None:
             log_dens = kde.score_samples(grid_pts)
             Z_kde = np.exp(log_dens).reshape(xx.shape)
             Z_norm = Z_kde / Z_kde.max()
+            kde_contours[cls] = Z_norm
             ax_s.contour(
                 xx,
                 yy,
@@ -442,9 +482,112 @@ def make_demo_plot(output_path: Path) -> None:
     )
     ax_s.tick_params(axis="both", colors=TEXT_COLOR)
 
+    # ── Bottom-right: Test launch sites with predicted classes ────────────────
+    ax_t.set_facecolor(PANEL_BG)
+    ax_t.tick_params(colors=TEXT_COLOR, labelsize=9)
+    for spine in ax_t.spines.values():
+        spine.set_edgecolor(GRID_COLOR)
+    ax_t.grid(True, color=GRID_COLOR, linewidth=0.6, linestyle="--", alpha=0.4)
+
+    if test_df is not None:
+        test_n_total = len(test_df)
+        test_counts = test_df["label"].value_counts().sort_index().to_dict()
+        test_unique = test_df[["launch_x", "launch_y"]].drop_duplicates()
+        n_test_unique = len(test_unique)
+
+        # Training KDE contours as muted reference (requires training data)
+        if launch_df is not None:
+            for cls in (0, 1, 2):
+                ax_t.contour(
+                    xx,
+                    yy,
+                    kde_contours[cls],
+                    levels=contour_levels,
+                    colors=[CLASS_COLOR[cls]],
+                    linewidths=[lw_outer, lw_inner],
+                    alpha=0.30,
+                    zorder=2,
+                    linestyles="dashed",
+                )
+
+        # Scatter: test sites by predicted class
+        sizes_t = {0: 4, 1: 8, 2: 14}
+        alphas_t = {0: 0.30, 1: 0.50, 2: 0.80}
+        for cls in (0, 1, 2):
+            sub = (
+                test_df[test_df["label"] == cls][["launch_x", "launch_y"]]
+                .drop_duplicates()
+                .values
+            )
+            n_pred = test_counts.get(cls, 0)
+            ax_t.scatter(
+                sub[:, 0],
+                sub[:, 1],
+                c=CLASS_COLOR[cls],
+                s=sizes_t[cls],
+                alpha=alphas_t[cls],
+                linewidths=0,
+                zorder=3,
+                label=f"Class {cls}  ({n_pred:,} predicted)",
+            )
+
+        # Match axis limits with training panel for direct comparison
+        if launch_df is not None:
+            ax_t.set_xlim(ax_s.get_xlim())
+            ax_t.set_ylim(ax_s.get_ylim())
+
+        ax_t.text(
+            0.02,
+            0.98,
+            f"Dashed contours = training KDE · {n_test_unique:,} unique sites\n"
+            "Colored by model prediction (no ground truth)",
+            transform=ax_t.transAxes,
+            color=TEXT_COLOR,
+            fontsize=7.5,
+            ha="left",
+            va="top",
+            alpha=0.80,
+            zorder=4,
+        )
+
+        ax_t.legend(
+            fontsize=7.5,
+            facecolor=PANEL_BG,
+            edgecolor=GRID_COLOR,
+            labelcolor=TEXT_COLOR,
+            loc="lower right",
+            markerscale=2.5,
+        )
+        test_title_suffix = f"({test_n_total:,} trajectories · {n_test_unique:,} unique sites)"
+    else:
+        ax_t.text(
+            0.5,
+            0.5,
+            "Test data not found.\nRun 'make run' to generate\nsubmission + test cache.",
+            transform=ax_t.transAxes,
+            ha="center",
+            va="center",
+            color=TEXT_COLOR,
+            fontsize=11,
+        )
+        test_title_suffix = "(data not found)"
+
+    ax_t.set_xlabel("Launch X (training coords)", color=TEXT_COLOR, fontsize=11, labelpad=6)
+    ax_t.set_ylabel("Launch Y (training coords)", color=TEXT_COLOR, fontsize=11, labelpad=6)
+    ax_t.set_title(
+        f"Launch Sites — Test Predictions\n{test_title_suffix}",
+        color=TEXT_COLOR,
+        fontsize=11,
+        fontweight="bold",
+        pad=12,
+    )
+    ax_t.tick_params(axis="both", colors=TEXT_COLOR)
+
     # ── Suptitle ──────────────────────────────────────────────────────────────
+    train_count = f"{len(launch_df):,}" if launch_df is not None else "?"
+    test_count = f"{len(test_df):,}" if test_df is not None else "?"
     fig.suptitle(
-        "Rocket Trajectory Classifier — Real Training Data (32,741 trajectories)",
+        f"Rocket Trajectory Classifier — Real Data ({train_count} train + {test_count} test)",
         color=TEXT_COLOR,
         fontsize=16,
         fontweight="bold",
