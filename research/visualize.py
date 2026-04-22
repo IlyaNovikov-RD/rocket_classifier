@@ -153,15 +153,13 @@ def load_test_launch_data() -> pd.DataFrame | None:
     """
     if not _TEST_CACHE_PATH.exists():
         logger.warning(
-            "Test cache not found at %s — test panel will be blank. "
-            "Run 'make run' to generate it.",
+            "Test cache not found at %s — test panel will be blank. Run 'make run' to generate it.",
             _TEST_CACHE_PATH,
         )
         return None
     if not _SUBMISSION_PATH.exists():
         logger.warning(
-            "Submission not found at %s — test panel will be blank. "
-            "Run 'make run' to generate it.",
+            "Submission not found at %s — test panel will be blank. Run 'make run' to generate it.",
             _SUBMISSION_PATH,
         )
         return None
@@ -515,9 +513,7 @@ def make_demo_plot(output_path: Path) -> None:
         alphas_t = {0: 0.30, 1: 0.50, 2: 0.80}
         for cls in (0, 1, 2):
             sub = (
-                test_df[test_df["label"] == cls][["launch_x", "launch_y"]]
-                .drop_duplicates()
-                .values
+                test_df[test_df["label"] == cls][["launch_x", "launch_y"]].drop_duplicates().values
             )
             n_pred = test_counts.get(cls, 0)
             ax_t.scatter(
